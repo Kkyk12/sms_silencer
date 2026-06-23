@@ -117,6 +117,39 @@ class StatusTab extends StatelessWidget {
           text: 'Everyone else rings normally with a sound notification.',
         ),
         const SizedBox(height: 24),
+
+        Text('Your privacy', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: const [
+              _PrivacyPoint(
+                icon: Icons.lock_outline,
+                title: 'Everything stays on your phone',
+                body: 'The app has no Internet access (check Android’s app '
+                    'permissions to confirm), so your messages and contacts '
+                    'can’t be sent anywhere. No servers, accounts, ads or '
+                    'analytics.',
+              ),
+              Divider(height: 1),
+              _PrivacyPoint(
+                icon: Icons.visibility_outlined,
+                title: 'Read only to filter',
+                body: 'Texts are read for one reason: to decide whether each '
+                    'one should ring or stay silent, and to show them in this app.',
+              ),
+              Divider(height: 1),
+              _PrivacyPoint(
+                icon: Icons.center_focus_strong_outlined,
+                title: 'One job, done well',
+                body: 'SMS Guard silences the senders you choose — nothing '
+                    'more. Your silence list is stored only on this device.',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
         Text(
           'SMS Guard must remain your default messaging app for filtering to '
           'work. You can switch back any time in Android settings.',
@@ -194,6 +227,55 @@ class _Step extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(text),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrivacyPoint extends StatelessWidget {
+  const _PrivacyPoint({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: scheme.primary),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  body,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
         ],

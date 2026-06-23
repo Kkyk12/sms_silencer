@@ -17,6 +17,18 @@ saved silently.
 - You can **add your own senders** (by number or name) to silence, and remove them
   at any time.
 
+## Privacy
+
+SMS Guard does one job without touching your data:
+
+- **No network access.** The release build declares **no `INTERNET` permission**, so
+  your messages and contacts cannot be sent anywhere. There are no servers,
+  accounts, ads, or analytics.
+- **Read only to filter.** Texts are read solely to decide ring vs. silent and to
+  show them in the app.
+- **Everything stays on-device.** Your silence list lives only in the app's local
+  storage on your phone.
+
 ## Architecture
 
 The filtering decision must run even when the UI is closed, so the core lives in
