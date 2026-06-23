@@ -149,10 +149,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         ],
       ),
       floatingActionButton: _index == 1
-          ? FloatingActionButton.extended(
+          ? FloatingActionButton.small(
               onPressed: _showAddDialog,
-              icon: const Icon(Icons.add),
-              label: const Text('Add sender'),
+              tooltip: 'Add sender',
+              child: const Icon(Icons.add),
             )
           : null,
       bottomNavigationBar: NavigationBar(

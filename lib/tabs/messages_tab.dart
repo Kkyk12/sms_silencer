@@ -101,17 +101,19 @@ class _MessageTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final silenced = message.silenced;
-    final accent = silenced ? scheme.onSurfaceVariant : scheme.primary;
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -1),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       leading: CircleAvatar(
-        radius: 22,
+        radius: 18,
         backgroundColor:
             silenced ? scheme.surfaceContainerHighest : scheme.primaryContainer,
         child: Text(
           _initial(message.address),
           style: TextStyle(
+            fontSize: 13,
             color: silenced ? scheme.onSurfaceVariant : scheme.onPrimaryContainer,
             fontWeight: FontWeight.bold,
           ),
@@ -120,42 +122,33 @@ class _MessageTile extends StatelessWidget {
       title: Row(
         children: [
           Expanded(
-            child: Text(
-              message.address,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    message.address,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                _StatusBadge(silenced: silenced),
+              ],
             ),
           ),
+          const SizedBox(width: 8),
           if (message.date.millisecondsSinceEpoch > 0)
             Text(_formatDate(message.date),
                 style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
-      isThreeLine: true,
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 2),
-          Text(message.body, maxLines: 2, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                silenced ? Icons.notifications_off : Icons.notifications_active,
-                size: 14,
-                color: accent,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                silenced ? 'Silenced' : 'Rings',
-                style: TextStyle(
-                    color: accent, fontSize: 12, fontWeight: FontWeight.w600),
-              ),
-            ],
-          ),
-        ],
+      subtitle: Text(
+        message.body,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 13),
       ),
     );
   }
@@ -172,6 +165,42 @@ class _MessageTile extends StatelessWidget {
     return sameDay
         ? DateFormat('h:mm a').format(date)
         : DateFormat('MMM d').format(date);
+  }
+}
+
+/// Compact pill shown next to a sender's name: muted = silenced, bell = rings.
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.silenced});
+
+  final bool silenced;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = silenced ? scheme.onSurfaceVariant : scheme.primary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            silenced ? Icons.notifications_off : Icons.notifications_active,
+            size: 11,
+            color: color,
+          ),
+          const SizedBox(width: 3),
+          Text(
+            silenced ? 'Silenced' : 'Rings',
+            style: TextStyle(
+                color: color, fontSize: 10, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
   }
 }
 

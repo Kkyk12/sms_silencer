@@ -84,12 +84,16 @@ class _SilencedTabState extends State<SilencedTab> {
                 for (var i = 0; i < custom.length; i++) ...[
                   if (i > 0) const Divider(height: 1),
                   ListTile(
+                    dense: true,
+                    visualDensity: const VisualDensity(vertical: -2),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                     leading: CircleAvatar(
+                      radius: 15,
                       backgroundColor: scheme.tertiaryContainer,
-                      child: Icon(Icons.person, color: scheme.onTertiaryContainer),
+                      child: Icon(Icons.person,
+                          size: 16, color: scheme.onTertiaryContainer),
                     ),
-                    title: Text(custom[i]),
-                    subtitle: const Text('Silenced'),
+                    title: Text(custom[i], style: const TextStyle(fontSize: 14)),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline),
                       tooltip: 'Remove',
@@ -112,20 +116,36 @@ class _SilencedTabState extends State<SilencedTab> {
               children: [
                 for (var i = 0; i < defaults.length; i++) ...[
                   if (i > 0) const Divider(height: 1),
-                  SwitchListTile(
-                    value: defaults[i].silenced,
-                    onChanged: (v) => context
-                        .read<AppState>()
-                        .toggleDefault(defaults[i].address, v),
-                    title: Text(defaults[i].address),
-                    subtitle: Text(defaults[i].silenced ? 'Silenced' : 'Rings'),
-                    secondary: CircleAvatar(
+                  ListTile(
+                    dense: true,
+                    visualDensity:
+                        const VisualDensity(horizontal: -2, vertical: -4),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    leading: CircleAvatar(
+                      radius: 14,
                       backgroundColor: scheme.surfaceContainerHighest,
                       child: Text(
                         defaults[i].address.substring(0, 1).toUpperCase(),
-                        style: TextStyle(color: scheme.onSurfaceVariant),
+                        style: TextStyle(
+                            color: scheme.onSurfaceVariant, fontSize: 11),
                       ),
                     ),
+                    title: Text(defaults[i].address,
+                        style: const TextStyle(fontSize: 14)),
+                    trailing: SizedBox(
+                      width: 40,
+                      child: Transform.scale(
+                        scale: 0.7,
+                        child: Switch(
+                          value: defaults[i].silenced,
+                          onChanged: (v) => context
+                              .read<AppState>()
+                              .toggleDefault(defaults[i].address, v),
+                        ),
+                      ),
+                    ),
+                    onTap: () => context.read<AppState>().toggleDefault(
+                        defaults[i].address, !defaults[i].silenced),
                   ),
                 ],
               ],
