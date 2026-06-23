@@ -7,6 +7,10 @@ It works by becoming the device's **default SMS app**, so it can intercept each
 incoming text and decide — before any sound plays — whether it should ring or be
 saved silently.
 
+> **📱 Android only.** This app must be the device's default SMS app, which only
+> Android allows. iOS does not let apps read or silence SMS, so it **cannot run on
+> iPhone** — there is no iOS version.
+
 ## How it works
 
 - Texts from senders on the **silence list** are saved to the inbox **without sound
