@@ -10,6 +10,7 @@ import android.os.Build
 import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SmsManager
+import android.telephony.SubscriptionManager
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -124,12 +125,15 @@ class MainActivity : FlutterActivity() {
                     "sendSms" -> {
                         val address = call.argument<String>("address")
                         val body = call.argument<String>("body")
+                        val subId = call.argument<Int>("subId") ?: -1
                         if (address.isNullOrBlank() || body == null) {
                             result.error("ARG", "address and body required", null)
                         } else {
-                            result.success(sendSms(address, body))
+                            result.success(sendSms(address, body, subId))
                         }
                     }
+
+                    "getSims" -> result.success(getSims())
 
                     "markRead" -> {
                         val address = call.argument<String>("address")
@@ -205,6 +209,32 @@ class MainActivity : FlutterActivity() {
         Prefs.getFolders(this).map { f ->
             hashMapOf("id" to f.id, "name" to f.name, "addresses" to f.addresses.toList())
         }
+
+    /** Active SIM cards: subscription id, slot index, and a display label. */
+    private fun getSims(): List<Map<String, Any?>> {
+        val out = ArrayList<Map<String, Any?>>()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) return out
+        try {
+            val sm = getSystemService(SubscriptionManager::class.java) ?: return out
+            val list = sm.activeSubscriptionInfoList ?: return out
+            for (info in list) {
+                val name = info.displayName?.toString()
+                    ?: info.carrierName?.toString()
+                    ?: "SIM ${info.simSlotIndex + 1}"
+                out.add(
+                    hashMapOf(
+                        "subId" to info.subscriptionId,
+                        "slot" to info.simSlotIndex,
+                        "label" to name,
+                    ),
+                )
+            }
+        } catch (_: SecurityException) {
+            // READ_PHONE_STATE not granted yet — no SIM info available.
+        } catch (_: Exception) {
+        }
+        return out
+    }
 
     private fun isDefaultSmsApp(): Boolean =
         Telephony.Sms.getDefaultSmsPackage(this) == packageName
@@ -370,7 +400,7 @@ class MainActivity : FlutterActivity() {
         val out = ArrayList<Map<String, Any?>>()
         val cursor = contentResolver.query(
             Telephony.Sms.CONTENT_URI,
-            arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE),
+            arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.SUBSCRIPTION_ID),
             null, null, "${Telephony.Sms.DATE} ASC",
         )
         cursor?.use { c ->
@@ -379,6 +409,7 @@ class MainActivity : FlutterActivity() {
             val iB = c.getColumnIndex(Telephony.Sms.BODY)
             val iD = c.getColumnIndex(Telephony.Sms.DATE)
             val iT = c.getColumnIndex(Telephony.Sms.TYPE)
+            val iSub = c.getColumnIndex(Telephony.Sms.SUBSCRIPTION_ID)
             while (c.moveToNext()) {
                 val addr = (if (iA >= 0) c.getString(iA) else null) ?: continue
                 if (convKey(addr) != key) continue
@@ -389,6 +420,7 @@ class MainActivity : FlutterActivity() {
                         "body" to (if (iB >= 0) c.getString(iB) else ""),
                         "date" to (if (iD >= 0) c.getLong(iD) else 0L),
                         "outgoing" to (type == Telephony.Sms.MESSAGE_TYPE_SENT),
+                        "subId" to (if (iSub >= 0) c.getInt(iSub) else -1),
                     ),
                 )
             }
@@ -464,14 +496,19 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Send an SMS and store it in the Sent box (default-app responsibility). */
-    private fun sendSms(address: String, body: String): Boolean {
+    /**
+     * Send an SMS and store it in the Sent box (default-app responsibility).
+     * [subId] selects which SIM to send on; -1 uses the system default.
+     */
+    private fun sendSms(address: String, body: String, subId: Int): Boolean {
         return try {
             val sms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                getSystemService(SmsManager::class.java)
+                val base = getSystemService(SmsManager::class.java)
+                if (subId >= 0) base.createForSubscriptionId(subId) else base
             } else {
                 @Suppress("DEPRECATION")
-                SmsManager.getDefault()
+                if (subId >= 0) SmsManager.getSmsManagerForSubscriptionId(subId)
+                else SmsManager.getDefault()
             }
             val parts = sms.divideMessage(body)
             if (parts.size > 1) {
@@ -487,6 +524,7 @@ class MainActivity : FlutterActivity() {
                     put(Telephony.Sms.READ, 1)
                     put(Telephony.Sms.SEEN, 1)
                     put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+                    if (subId >= 0) put(Telephony.Sms.SUBSCRIPTION_ID, subId)
                 }
                 contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
             } catch (_: Exception) {

@@ -1,10 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import 'app_state.dart';
 import 'app_theme.dart';
+import 'models.dart';
 import 'native_bridge.dart';
 import 'screens/new_message_screen.dart';
 import 'screens/thread_screen.dart';
@@ -286,6 +289,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               )
             : null,
         actions: [
+          IconButton(
+            tooltip: 'Search',
+            icon: SvgPicture.asset(
+              'assets/icons/magnifying-glass.svg',
+              width: 22,
+              height: 22,
+              colorFilter:
+                  ColorFilter.mode(scheme.onSurface, BlendMode.srcIn),
+            ),
+            onPressed: () => showSearch(
+              context: context,
+              delegate: _ConvoSearchDelegate(state.conversations),
+            ),
+          ),
+          const SizedBox(width: 4),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (value) {
@@ -342,7 +360,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          if (!state.isDefaultSmsApp && !_defaultBannerDismissed)
+          if (state.statusChecked &&
+              !state.isDefaultSmsApp &&
+              !_defaultBannerDismissed)
             _DefaultAppBanner(
               onDismiss: () => setState(() => _defaultBannerDismissed = true),
             ),
@@ -517,6 +537,102 @@ class _SmsBannerState extends State<_SmsBanner>
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+
+/// Searches conversations by contact name, number, or last message text.
+class _ConvoSearchDelegate extends SearchDelegate<void> {
+  _ConvoSearchDelegate(this.conversations)
+      : super(searchFieldLabel: 'Search messages');
+
+  final List<Conversation> conversations;
+
+  List<Conversation> _filtered() {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return conversations;
+    return conversations.where((c) {
+      return c.displayName.toLowerCase().contains(q) ||
+          c.address.toLowerCase().contains(q) ||
+          c.lastBody.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  static String _initial(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '#' : t.substring(0, 1).toUpperCase();
+  }
+
+  @override
+  List<Widget> buildActions(BuildContext context) => [
+        if (query.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => query = '',
+          ),
+      ];
+
+  @override
+  Widget buildLeading(BuildContext context) => IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () => close(context, null),
+      );
+
+  @override
+  Widget buildResults(BuildContext context) => _buildList(context);
+
+  @override
+  Widget buildSuggestions(BuildContext context) => _buildList(context);
+
+  Widget _buildList(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final results = _filtered();
+    if (results.isEmpty) {
+      return Center(
+        child: Text(
+          'No conversations found',
+          style: TextStyle(color: scheme.onSurfaceVariant),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: results.length,
+      itemBuilder: (_, i) {
+        final c = results[i];
+        return ListTile(
+          leading: CircleAvatar(
+            backgroundColor: scheme.surfaceContainerHighest,
+            child: Text(
+              _initial(c.displayName),
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          title: Text(
+            c.displayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            c.lastBody.replaceAll('\n', ' '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Text(
+            DateFormat('MMM d').format(c.date),
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
+          onTap: () {
+            final addr = c.address;
+            close(context, null);
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => ThreadScreen(address: addr)),
+            );
+          },
+        );
+      },
+    );
+  }
+}
 
 /// Persistent reminder shown until the app is set as the default SMS app.
 class _DefaultAppBanner extends StatelessWidget {

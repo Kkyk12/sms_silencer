@@ -83,10 +83,22 @@ class NativeBridge {
         .toList();
   }
 
-  static Future<bool> sendSms(String address, String body) async {
-    final ok = await _channel
-        .invokeMethod<bool>('sendSms', {'address': address, 'body': body});
+  static Future<bool> sendSms(String address, String body,
+      {int subId = -1}) async {
+    final ok = await _channel.invokeMethod<bool>(
+      'sendSms',
+      {'address': address, 'body': body, 'subId': subId},
+    );
     return ok ?? false;
+  }
+
+  /// Active SIM cards on the device (empty if READ_PHONE_STATE not granted).
+  static Future<List<SimInfo>> getSims() async {
+    final raw = await _channel.invokeListMethod<dynamic>('getSims');
+    if (raw == null) return <SimInfo>[];
+    return raw
+        .map((e) => SimInfo.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
   }
 
   static Future<void> markRead(String address) {

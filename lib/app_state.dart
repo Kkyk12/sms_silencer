@@ -13,6 +13,11 @@ class AppState extends ChangeNotifier {
   bool smsGranted = false;
   bool notificationsGranted = false;
   bool contactsGranted = false;
+  bool phoneGranted = false;
+
+  /// True once the first real status check has completed. Until then the UI
+  /// shouldn't show the "not default app" banner (avoids a startup flash).
+  bool statusChecked = false;
 
   List<SilenceEntry> defaults = <SilenceEntry>[];
   List<String> custom = <String>[];
@@ -101,6 +106,8 @@ class AppState extends ChangeNotifier {
     smsGranted = await Permission.sms.isGranted;
     notificationsGranted = await Permission.notification.isGranted;
     contactsGranted = await Permission.contacts.isGranted;
+    phoneGranted = await Permission.phone.isGranted;
+    statusChecked = true;
     notifyListeners();
   }
 
@@ -109,6 +116,7 @@ class AppState extends ChangeNotifier {
       Permission.sms,
       Permission.notification,
       Permission.contacts,
+      Permission.phone,
     ].request();
     await refreshStatus();
     await loadConversations();
@@ -122,7 +130,7 @@ class AppState extends ChangeNotifier {
   /// messages can actually alert). Prompts only for whatever is missing.
   Future<void> ensureStartupPermissions() async {
     await refreshStatus();
-    if (!smsGranted || !notificationsGranted) {
+    if (!smsGranted || !notificationsGranted || !phoneGranted) {
       await requestPermissions();
     }
   }

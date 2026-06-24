@@ -20,6 +20,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   List<ThreadMessage> _messages = [];
+  List<SimInfo> _sims = [];
   bool _loading = true;
   bool _sending = false;
   String? _name;
@@ -36,6 +37,22 @@ class _ThreadScreenState extends State<ThreadScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadSims();
+  }
+
+  Future<void> _loadSims() async {
+    final sims = await NativeBridge.getSims();
+    if (mounted) setState(() => _sims = sims);
+  }
+
+  /// SIM tag ("SIM1"/"SIM2") for a message, or null when there's only one SIM
+  /// or the message's SIM can't be matched to a current card.
+  String? _simTag(ThreadMessage m) {
+    if (_sims.length < 2 || m.subId < 0) return null;
+    for (final s in _sims) {
+      if (s.subId == m.subId) return s.shortLabel;
+    }
+    return null;
   }
 
   @override
@@ -66,11 +83,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
     });
   }
 
-  Future<void> _send() async {
+  Future<void> _send({int subId = -1}) async {
     final text = _input.text.trim();
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
-    final ok = await NativeBridge.sendSms(widget.address, text);
+    final ok = await NativeBridge.sendSms(widget.address, text, subId: subId);
     if (!mounted) return;
     if (ok) {
       _input.clear();
@@ -81,6 +98,60 @@ class _ThreadScreenState extends State<ThreadScreen> {
       );
     }
     if (mounted) setState(() => _sending = false);
+  }
+
+  /// Long-press the send button: pick which SIM to send on (dual-SIM only).
+  Future<void> _pickSimAndSend() async {
+    if (_input.text.trim().isEmpty) return;
+    if (_sims.length < 2) {
+      _send();
+      return;
+    }
+    final scheme = Theme.of(context).colorScheme;
+    final chosen = await showModalBottomSheet<int>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Text(
+                'Send with',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            ..._sims.map(
+              (s) => ListTile(
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: AppColors.primary.withValues(alpha: 0.14),
+                  child: Text(
+                    '${s.slot + 1}',
+                    style: const TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                title: Text(s.label),
+                subtitle: Text(s.shortLabel,
+                    style: TextStyle(color: scheme.onSurfaceVariant)),
+                onTap: () => Navigator.pop(ctx, s.subId),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null) _send(subId: chosen);
   }
 
   Future<void> _deleteMessage(ThreadMessage m) async {
@@ -245,6 +316,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                                     child: _Bubble(
                                       message: m,
                                       tightTop: grouped,
+                                      simTag: _simTag(m),
                                     ),
                                   ),
                                 ),
@@ -258,6 +330,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
             controller: _input,
             sending: _sending,
             onSend: _send,
+            onLongPressSend: _sims.length >= 2 ? _pickSimAndSend : null,
           ),
         ],
       ),
@@ -313,11 +386,13 @@ class _DateChip extends StatelessWidget {
 // ── Chat bubble ────────────────────────────────────────────────────────────────
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, this.tightTop = false});
+  const _Bubble({required this.message, this.tightTop = false, this.simTag});
 
   final ThreadMessage message;
   // true when previous message was from the same side — less vertical space
   final bool tightTop;
+  // "SIM1"/"SIM2" shown beside the time; null to hide.
+  final String? simTag;
 
   @override
   Widget build(BuildContext context) {
@@ -360,10 +435,35 @@ class _Bubble extends StatelessWidget {
           Padding(
             padding: EdgeInsets.only(
                 top: 3, left: out ? 0 : 6, right: out ? 6 : 0),
-            child: Text(
-              DateFormat('h:mm a').format(message.date),
-              style: TextStyle(
-                  fontSize: 11, color: scheme.onSurfaceVariant),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  DateFormat('h:mm a').format(message.date),
+                  style: TextStyle(
+                      fontSize: 11, color: scheme.onSurfaceVariant),
+                ),
+                if (simTag != null) ...[
+                  const SizedBox(width: 5),
+                  Container(
+                    width: 3,
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: scheme.onSurfaceVariant,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    simTag!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -379,11 +479,14 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.sending,
     required this.onSend,
+    this.onLongPressSend,
   });
 
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
+  // Long-press the send button to choose a SIM (dual-SIM only); null disables.
+  final VoidCallback? onLongPressSend;
 
   @override
   Widget build(BuildContext context) {
@@ -449,6 +552,7 @@ class _Composer extends StatelessWidget {
                     child: InkWell(
                       customBorder: const CircleBorder(),
                       onTap: onSend,
+                      onLongPress: onLongPressSend,
                       child: const SizedBox(
                         width: 46,
                         height: 46,

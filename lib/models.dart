@@ -113,11 +113,15 @@ class ThreadMessage {
   final DateTime date;
   final bool outgoing;
 
+  /// Subscription (SIM) id this message was sent/received on; -1 if unknown.
+  final int subId;
+
   ThreadMessage({
     required this.id,
     required this.body,
     required this.date,
     required this.outgoing,
+    this.subId = -1,
   });
 
   factory ThreadMessage.fromMap(Map<String, dynamic> m) => ThreadMessage(
@@ -125,5 +129,24 @@ class ThreadMessage {
         body: (m['body'] as String?) ?? '',
         date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num?)?.toInt() ?? 0),
         outgoing: (m['outgoing'] as bool?) ?? false,
+        subId: (m['subId'] as num?)?.toInt() ?? -1,
+      );
+}
+
+/// An active SIM card.
+class SimInfo {
+  final int subId;
+  final int slot;
+  final String label;
+
+  const SimInfo({required this.subId, required this.slot, required this.label});
+
+  /// Short tag like "SIM1" / "SIM2" (slot is 0-based).
+  String get shortLabel => 'SIM${slot + 1}';
+
+  factory SimInfo.fromMap(Map<String, dynamic> m) => SimInfo(
+        subId: (m['subId'] as num?)?.toInt() ?? -1,
+        slot: (m['slot'] as num?)?.toInt() ?? 0,
+        label: (m['label'] as String?) ?? 'SIM',
       );
 }

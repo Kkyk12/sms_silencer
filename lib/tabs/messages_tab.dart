@@ -351,8 +351,6 @@ class _FolderTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (folders.isEmpty) return const SizedBox.shrink();
-
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: 44,
