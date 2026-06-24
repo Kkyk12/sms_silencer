@@ -38,6 +38,17 @@ class AppState extends ChangeNotifier {
   /// Cached contact photo bytes keyed by conversation address.
   final Map<String, Uint8List?> contactPhotos = <String, Uint8List?>{};
 
+  /// In-memory drafts: unsent text per conversation address.
+  final Map<String, String> _drafts = <String, String>{};
+  String getDraft(String address) => _drafts[address] ?? '';
+  void saveDraft(String address, String text) {
+    if (text.isEmpty) {
+      _drafts.remove(address);
+    } else {
+      _drafts[address] = text;
+    }
+  }
+
   bool get isReady => isDefaultSmsApp && smsGranted;
   int get mutedDefaultsCount => defaults.where((e) => e.silenced).length;
   int get activeSilencedCount => mutedDefaultsCount + custom.length;

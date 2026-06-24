@@ -26,10 +26,12 @@ class _ThreadScreenState extends State<ThreadScreen> {
   List<ScheduledMessage> _scheduled = [];
   final Set<int> _selectedIds = {};
   int _defaultSubId = -1;
+  int _selectedSubId = -1; // tracks which SIM will be used for the next send
   bool _loading = true;
   bool _sending = false;
   String? _name;
   Uint8List? _contactPhoto;
+  AppState? _appState; // held for use in dispose()
 
   bool get _selecting => _selectedIds.isNotEmpty;
 
@@ -44,6 +46,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _appState = context.read<AppState>();
+      final draft = _appState!.getDraft(widget.address);
+      if (draft.isNotEmpty) {
+        _input.text = draft;
+        _input.selection =
+            TextSelection.fromPosition(TextPosition(offset: draft.length));
+      }
+    });
     _load();
     _loadSims();
   }
@@ -56,6 +67,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
     if (mounted) setState(() {
       _sims = results[0] as List<SimInfo>;
       _defaultSubId = results[1] as int;
+      if (_selectedSubId == -1) _selectedSubId = _defaultSubId;
     });
   }
 
@@ -69,20 +81,20 @@ class _ThreadScreenState extends State<ThreadScreen> {
     return null;
   }
 
-  /// Short label (e.g. "SIM1") for the SIM that will be used when the user
-  /// taps send without choosing a specific one.
+  /// Short label for the SIM that will be used on the next send tap.
   String? get _currentSimLabel {
     if (_sims.isEmpty) return null;
-    if (_sims.length == 1) return _sims.first.shortLabel;
-    // Find the default SMS SIM
     for (final s in _sims) {
-      if (s.subId == _defaultSubId) return s.shortLabel;
+      if (s.subId == _selectedSubId) return s.shortLabel;
     }
+    if (_sims.length == 1) return _sims.first.shortLabel;
     return _sims.first.shortLabel;
   }
 
   @override
   void dispose() {
+    // Persist whatever is in the text field as a draft (empty = clears draft)
+    _appState?.saveDraft(widget.address, _input.text.trim());
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -115,14 +127,17 @@ class _ThreadScreenState extends State<ThreadScreen> {
     });
   }
 
-  Future<void> _send({int subId = -1}) async {
+  Future<void> _send({int? subId}) async {
     final text = _input.text.trim();
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
-    final ok = await NativeBridge.sendSms(widget.address, text, subId: subId);
+    final effectiveSubId = subId ?? _selectedSubId;
+    final ok = await NativeBridge.sendSms(widget.address, text,
+        subId: effectiveSubId);
     if (!mounted) return;
     if (ok) {
       _input.clear();
+      _appState?.saveDraft(widget.address, ''); // clear draft on send
       await _load();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -309,17 +324,28 @@ class _ThreadScreenState extends State<ThreadScreen> {
                 (s) => ListTile(
                   leading: CircleAvatar(
                     radius: 16,
-                    backgroundColor: AppColors.primary.withValues(alpha: 0.14),
+                    backgroundColor: s.subId == _selectedSubId
+                        ? AppColors.primary
+                        : AppColors.primary.withValues(alpha: 0.14),
                     child: Text('${s.slot + 1}',
-                        style: const TextStyle(
-                            color: AppColors.primary,
+                        style: TextStyle(
+                            color: s.subId == _selectedSubId
+                                ? Colors.white
+                                : AppColors.primary,
                             fontWeight: FontWeight.w700,
                             fontSize: 13)),
                   ),
                   title: Text(s.label),
                   subtitle: Text(s.shortLabel,
                       style: TextStyle(color: scheme.onSurfaceVariant)),
-                  onTap: () { Navigator.pop(ctx); _send(subId: s.subId); },
+                  trailing: s.subId == _selectedSubId
+                      ? const Icon(Icons.check, color: AppColors.primary, size: 18)
+                      : null,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _selectedSubId = s.subId);
+                    _send(subId: s.subId);
+                  },
                 ),
               ),
             ],
@@ -724,14 +750,16 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
         decoration: BoxDecoration(
           color: scheme.surface,
-          border: Border(
-            top: BorderSide(
-              color: scheme.outlineVariant.withValues(alpha: 0.4),
+          boxShadow: [
+            BoxShadow(
+              color: scheme.shadow.withValues(alpha: 0.06),
+              blurRadius: 8,
+              offset: const Offset(0, -2),
             ),
-          ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -740,28 +768,23 @@ class _Composer extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: 46),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                    child: TextField(
-                      controller: controller,
-                      minLines: 1,
-                      maxLines: 6,
-                      textCapitalization: TextCapitalization.sentences,
-                      style: const TextStyle(fontSize: 15),
-                      decoration: InputDecoration(
-                        hintText: 'Message…',
-                        hintStyle: TextStyle(color: scheme.onSurfaceVariant),
-                        border: InputBorder.none,
-                        filled: false,
-                        isCollapsed: true,
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                  child: TextField(
+                    controller: controller,
+                    minLines: 1,
+                    maxLines: 6,
+                    textCapitalization: TextCapitalization.sentences,
+                    style: const TextStyle(fontSize: 15),
+                    decoration: InputDecoration(
+                      hintText: 'Message…',
+                      hintStyle: TextStyle(
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.6)),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                      isCollapsed: true,
+                      contentPadding: const EdgeInsets.only(
+                          left: 4, right: 4, bottom: 12, top: 12),
                     ),
                   ),
                 ),
