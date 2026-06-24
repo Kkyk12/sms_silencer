@@ -231,15 +231,21 @@ class _ThreadScreenState extends State<ThreadScreen> {
                                 prev != null &&
                                 prev.outgoing == m.outgoing;
                             return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 if (showDate)
                                   _DateChip(date: m.date),
-                                GestureDetector(
-                                  onLongPress: () =>
-                                      _deleteMessage(m),
-                                  child: _Bubble(
-                                    message: m,
-                                    tightTop: grouped,
+                                Align(
+                                  alignment: m.outgoing
+                                      ? Alignment.centerRight
+                                      : Alignment.centerLeft,
+                                  child: GestureDetector(
+                                    onLongPress: () =>
+                                        _deleteMessage(m),
+                                    child: _Bubble(
+                                      message: m,
+                                      tightTop: grouped,
+                                    ),
                                   ),
                                 ),
                               ],
