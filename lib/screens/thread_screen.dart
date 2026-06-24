@@ -342,9 +342,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
                       ? const Icon(Icons.check, color: AppColors.primary, size: 18)
                       : null,
                   onTap: () {
-                    Navigator.pop(ctx);
+                    // Only switch the active SIM — do NOT send yet.
                     setState(() => _selectedSubId = s.subId);
-                    _send(subId: s.subId);
+                    Navigator.pop(ctx);
                   },
                 ),
               ),

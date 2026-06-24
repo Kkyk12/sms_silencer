@@ -47,6 +47,7 @@ class AppState extends ChangeNotifier {
     } else {
       _drafts[address] = text;
     }
+    notifyListeners(); // rebuild conversation list to show/hide draft label
   }
 
   bool get isReady => isDefaultSmsApp && smsGranted;

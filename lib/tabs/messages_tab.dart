@@ -280,11 +280,13 @@ class _MessagesTabState extends State<MessagesTab>
       };
     }
 
-    // Pinned conversations float to the top.
+    // Sort: pinned first → with draft second → by date.
     list = [...list]..sort((a, b) {
-        if (a.pinned && !b.pinned) return -1;
-        if (!a.pinned && b.pinned) return 1;
-        return 0;
+        if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+        final aDraft = state.getDraft(a.address).isNotEmpty;
+        final bDraft = state.getDraft(b.address).isNotEmpty;
+        if (aDraft != bDraft) return aDraft ? -1 : 1;
+        return b.date.compareTo(a.date);
       });
 
     return Column(
@@ -325,11 +327,13 @@ class _MessagesTabState extends State<MessagesTab>
                         itemBuilder: (_, i) {
                           final c = list[i];
                           final photo = state.contactPhotos[c.address];
+                          final draft = state.getDraft(c.address);
                           return _ConversationTile(
                             convo: c,
                             selecting: _selecting,
                             selected: _selected.contains(c.address),
                             contactPhoto: photo,
+                            draft: draft,
                             onTap: () => _selecting ? _toggle(c) : _open(c),
                             onLongPress: () => _toggle(c),
                           );
@@ -570,6 +574,7 @@ class _ConversationTile extends StatelessWidget {
     required this.onTap,
     required this.onLongPress,
     this.contactPhoto,
+    this.draft = '',
   });
 
   final Conversation convo;
@@ -578,6 +583,7 @@ class _ConversationTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final Uint8List? contactPhoto;
+  final String draft;
 
   @override
   Widget build(BuildContext context) {
@@ -680,6 +686,15 @@ class _ConversationTile extends StatelessWidget {
                         Icon(Icons.block,
                             size: 14, color: scheme.error),
                         const SizedBox(width: 4),
+                      ] else if (draft.isNotEmpty) ...[
+                        Text(
+                          'Draft: ',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.error,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ] else if (silenced) ...[
                         Icon(Icons.notifications_off,
                             size: 14, color: scheme.onSurfaceVariant),
@@ -689,19 +704,24 @@ class _ConversationTile extends StatelessWidget {
                         child: Text(
                           blocked
                               ? 'Blocked'
-                              : convo.lastBody.replaceAll('\n', ' '),
-                          maxLines: 2,
+                              : draft.isNotEmpty
+                                  ? draft.replaceAll('\n', ' ')
+                                  : convo.lastBody.replaceAll('\n', ' '),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 13,
                             height: 1.25,
                             color: blocked
                                 ? scheme.error
-                                : unread
-                                    ? scheme.onSurface
-                                    : scheme.onSurfaceVariant,
-                            fontWeight:
-                                unread ? FontWeight.w500 : FontWeight.normal,
+                                : draft.isNotEmpty
+                                    ? scheme.onSurfaceVariant
+                                    : unread
+                                        ? scheme.onSurface
+                                        : scheme.onSurfaceVariant,
+                            fontWeight: unread && draft.isEmpty
+                                ? FontWeight.w500
+                                : FontWeight.normal,
                           ),
                         ),
                       ),
