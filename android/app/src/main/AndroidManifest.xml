@@ -76,6 +76,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- Handles inline reply from notifications -->
+        <receiver
+            android:name=".ReplyReceiver"
+            android:exported="false"/>
+
         <!-- Required: MMS delivery receiver for default SMS app -->
         <receiver
             android:name=".MmsReceiver"

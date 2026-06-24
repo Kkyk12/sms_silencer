@@ -32,6 +32,16 @@ class SmsReceiver : BroadcastReceiver() {
         // The core rule: silenced senders stay quiet; everyone else rings.
         val silenced = Prefs.isSilenced(context, sender)
         NotificationHelper.showSms(context, sender, body, silenced)
+
+        // Tell the foreground app (if open) so it can show an in-app banner.
+        context.sendBroadcast(
+            Intent("com.smsguard.sms_bllocker.SMS_ARRIVED").apply {
+                setPackage(context.packageName)
+                putExtra("sender", sender)
+                putExtra("body", body)
+                putExtra("silenced", silenced)
+            }
+        )
     }
 
     private fun persistToInbox(context: Context, sender: String, body: String, timestamp: Long) {

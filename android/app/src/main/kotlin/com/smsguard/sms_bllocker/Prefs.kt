@@ -1,6 +1,10 @@
 package com.smsguard.sms_bllocker
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class ChatFolder(val id: String, val name: String, val addresses: Set<String>)
 
 /**
  * Single source of truth for the silence list, shared between the UI
@@ -89,6 +93,58 @@ object Prefs {
         val s = sender.trim()
         if (s.isEmpty()) return false
         return activeSilenced(context).any { matches(it, s) }
+    }
+
+    // ── Chat folders ─────────────────────────────────────────────────────────
+
+    private const val KEY_FOLDERS = "chat_folders"
+
+    fun getFolders(context: Context): List<ChatFolder> {
+        val json = prefs(context).getString(KEY_FOLDERS, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                val addrs = obj.optJSONArray("addrs") ?: JSONArray()
+                ChatFolder(
+                    id = obj.getString("id"),
+                    name = obj.getString("name"),
+                    addresses = (0 until addrs.length()).map { addrs.getString(it) }.toHashSet(),
+                )
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    private fun saveFolders(context: Context, folders: List<ChatFolder>) {
+        val arr = JSONArray()
+        folders.forEach { f ->
+            val obj = JSONObject()
+            obj.put("id", f.id)
+            obj.put("name", f.name)
+            val addrs = JSONArray()
+            f.addresses.forEach { addrs.put(it) }
+            obj.put("addrs", addrs)
+            arr.put(obj)
+        }
+        prefs(context).edit().putString(KEY_FOLDERS, arr.toString()).apply()
+    }
+
+    fun createFolder(context: Context, name: String): String {
+        val id = System.currentTimeMillis().toString()
+        val folders = getFolders(context).toMutableList()
+        folders.add(ChatFolder(id = id, name = name, addresses = emptySet()))
+        saveFolders(context, folders)
+        return id
+    }
+
+    fun deleteFolder(context: Context, id: String) {
+        saveFolders(context, getFolders(context).filter { it.id != id })
+    }
+
+    fun addToFolder(context: Context, folderId: String, addresses: Set<String>) {
+        saveFolders(context, getFolders(context).map { f ->
+            if (f.id == folderId) f.copy(addresses = f.addresses + addresses) else f
+        })
     }
 
     /**

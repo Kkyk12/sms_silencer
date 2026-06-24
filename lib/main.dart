@@ -1,9 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 
 import 'app_state.dart';
 import 'app_theme.dart';
+import 'native_bridge.dart';
 import 'screens/new_message_screen.dart';
 import 'screens/thread_screen.dart';
 import 'tabs/messages_tab.dart';
@@ -101,11 +103,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _index = 0;
   static const _titles = ['Messages', 'Silenced', 'Status'];
 
+  StreamSubscription<Map<String, dynamic>>? _smsSub;
+  OverlayEntry? _banner;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Once the UI is up, proactively ask to be the default SMS app.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await Future<void>.delayed(const Duration(milliseconds: 800));
       if (!mounted) return;
@@ -113,10 +117,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       await st.ensureStartupPermissions();
       await st.autoPromptDefaultIfNeeded();
     });
+    _smsSub = NativeBridge.smsEvents.listen(_onSmsArrived);
   }
 
   @override
   void dispose() {
+    _smsSub?.cancel();
+    _banner?.remove();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -126,6 +133,47 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       context.read<AppState>().refreshOnResume();
     }
+  }
+
+  void _onSmsArrived(Map<String, dynamic> data) {
+    final address = data['sender'] as String? ?? '';
+    final body = data['body'] as String? ?? '';
+    // Use cached contact name if we already know this sender
+    final state = context.read<AppState>();
+    final convo = state.conversations
+        .where((c) => c.address == address)
+        .firstOrNull;
+    final displayName = convo?.displayName ?? address;
+    state.loadConversations();
+    _showBanner(displayName: displayName, address: address, body: body);
+  }
+
+  void _showBanner({
+    required String displayName,
+    required String address,
+    required String body,
+  }) {
+    _banner?.remove();
+    _banner = null;
+    final entry = OverlayEntry(
+      builder: (_) => _SmsBanner(
+        displayName: displayName,
+        body: body,
+        onTap: () {
+          _banner?.remove();
+          _banner = null;
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ThreadScreen(address: address)),
+          );
+        },
+        onDismiss: () {
+          _banner?.remove();
+          _banner = null;
+        },
+      ),
+    );
+    Overlay.of(context).insert(entry);
+    _banner = entry;
   }
 
   Future<void> _showAddDialog() async {
@@ -300,13 +348,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               onPressed: _openNewMessage,
               tooltip: 'New message',
               backgroundColor: scheme.surfaceContainerHighest,
-              child: SvgPicture.asset(
-                'assets/icons/pencil-simple.svg',
-                width: 24,
-                height: 24,
-                colorFilter: ColorFilter.mode(
-                    scheme.onSurfaceVariant, BlendMode.srcIn),
-              ),
+              child: Icon(Icons.edit_outlined, color: scheme.onSurfaceVariant),
             )
           : _index == 1
               ? FloatingActionButton.small(
@@ -320,6 +362,150 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
 }
+
+// ── In-app SMS banner ──────────────────────────────────────────────────────────
+
+class _SmsBanner extends StatefulWidget {
+  const _SmsBanner({
+    required this.displayName,
+    required this.body,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  final String displayName;
+  final String body;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_SmsBanner> createState() => _SmsBannerState();
+}
+
+class _SmsBannerState extends State<_SmsBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<Offset> _slide;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _slide = Tween(begin: const Offset(0, -1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
+    );
+    _ctrl.forward();
+    _timer = Timer(const Duration(seconds: 4), _dismiss);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _dismiss() async {
+    _timer?.cancel();
+    if (!mounted) return;
+    await _ctrl.reverse();
+    widget.onDismiss();
+  }
+
+  static String _initial(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '#' : t.substring(0, 1).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final top = MediaQuery.of(context).viewPadding.top;
+
+    return Positioned(
+      top: top + 10,
+      left: 12,
+      right: 12,
+      child: SlideTransition(
+        position: _slide,
+        child: GestureDetector(
+          onTap: () {
+            _timer?.cancel();
+            widget.onTap();
+          },
+          onVerticalDragUpdate: (d) {
+            if ((d.primaryDelta ?? 0) < -6) _dismiss();
+          },
+          child: Material(
+            elevation: 8,
+            borderRadius: BorderRadius.circular(18),
+            color: scheme.surfaceContainerHigh,
+            shadowColor: Colors.black.withValues(alpha: 0.25),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 21,
+                    backgroundColor: AppColors.primary.withValues(alpha: 0.14),
+                    child: Text(
+                      _initial(widget.displayName),
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.displayName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.body,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _dismiss,
+                    child: Icon(Icons.close,
+                        size: 18, color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 /// Persistent reminder shown until the app is set as the default SMS app.
 class _DefaultAppBanner extends StatelessWidget {

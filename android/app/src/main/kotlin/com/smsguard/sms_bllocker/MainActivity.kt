@@ -1,14 +1,19 @@
 package com.smsguard.sms_bllocker
 
 import android.app.role.RoleManager
+import android.content.BroadcastReceiver
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SmsManager
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
@@ -18,13 +23,49 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     private val channelName = "sms_guard/native"
+    private val eventsChannelName = "sms_guard/events"
     private val roleRequestCode = 4231
+    private var eventSink: EventChannel.EventSink? = null
+
+    private val smsArrivedReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val sender = intent.getStringExtra("sender") ?: return
+            val body = intent.getStringExtra("body") ?: return
+            val silenced = intent.getBooleanExtra("silenced", false)
+            if (!silenced) {
+                eventSink?.success(hashMapOf("sender" to sender, "body" to body))
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ContextCompat.registerReceiver(
+            this, smsArrivedReceiver,
+            IntentFilter("com.smsguard.sms_bllocker.SMS_ARRIVED"),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try { unregisterReceiver(smsArrivedReceiver) } catch (_: Exception) {}
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Make sure the notification channels exist as soon as the app opens.
         NotificationHelper.ensureChannels(this)
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, eventsChannelName)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    eventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    eventSink = null
+                }
+            })
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
@@ -130,10 +171,40 @@ class MainActivity : FlutterActivity() {
 
                     "getMessages" -> result.success(readInbox())
 
+                    "getFolders" -> result.success(folderList())
+
+                    "createFolder" -> {
+                        val name = call.argument<String>("name")
+                        if (name.isNullOrBlank()) result.error("ARG", "name required", null)
+                        else result.success(Prefs.createFolder(this, name))
+                    }
+
+                    "deleteFolder" -> {
+                        val id = call.argument<String>("id")
+                        if (id.isNullOrBlank()) result.error("ARG", "id required", null)
+                        else { Prefs.deleteFolder(this, id); result.success(null) }
+                    }
+
+                    "addToFolder" -> {
+                        val folderId = call.argument<String>("folderId")
+                        val addresses = call.argument<List<String>>("addresses")
+                        if (folderId.isNullOrBlank() || addresses == null) {
+                            result.error("ARG", "folderId and addresses required", null)
+                        } else {
+                            Prefs.addToFolder(this, folderId, addresses.toSet())
+                            result.success(null)
+                        }
+                    }
+
                     else -> result.notImplemented()
                 }
             }
     }
+
+    private fun folderList(): List<Map<String, Any?>> =
+        Prefs.getFolders(this).map { f ->
+            hashMapOf("id" to f.id, "name" to f.name, "addresses" to f.addresses.toList())
+        }
 
     private fun isDefaultSmsApp(): Boolean =
         Telephony.Sms.getDefaultSmsPackage(this) == packageName

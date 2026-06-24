@@ -6,6 +6,14 @@ import 'models.dart';
 /// Every SMS-framework operation goes through here.
 class NativeBridge {
   static const MethodChannel _channel = MethodChannel('sms_guard/native');
+  static const EventChannel _events = EventChannel('sms_guard/events');
+
+  /// Stream of incoming non-silenced SMS events while the app is in the
+  /// foreground. Each event is a map with "sender" and "body" keys.
+  static Stream<Map<String, dynamic>> get smsEvents =>
+      _events.receiveBroadcastStream().map(
+            (e) => Map<String, dynamic>.from(e as Map),
+          );
 
   /// Is this app currently Android's default SMS app? Filtering only works if so.
   static Future<bool> isDefaultSmsApp() async {
@@ -111,5 +119,29 @@ class NativeBridge {
 
   static Future<void> testNotification() {
     return _channel.invokeMethod<void>('testNotification');
+  }
+
+  static Future<List<Folder>> getFolders() async {
+    final raw = await _channel.invokeListMethod<dynamic>('getFolders');
+    if (raw == null) return [];
+    return raw
+        .map((e) => Folder.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  static Future<String> createFolder(String name) async {
+    return (await _channel
+            .invokeMethod<String>('createFolder', {'name': name})) ??
+        '';
+  }
+
+  static Future<void> deleteFolder(String id) {
+    return _channel.invokeMethod<void>('deleteFolder', {'id': id});
+  }
+
+  static Future<void> addToFolder(
+      String folderId, List<String> addresses) {
+    return _channel.invokeMethod<void>(
+        'addToFolder', {'folderId': folderId, 'addresses': addresses});
   }
 }

@@ -21,6 +21,8 @@ class AppState extends ChangeNotifier {
   bool _askedDefaultThisSession = false;
   ThemeMode themeMode = ThemeMode.system;
   MsgFilter msgFilter = MsgFilter.rings;
+  List<Folder> folders = <Folder>[];
+  String? activeFolderId;
 
   bool get isReady => isDefaultSmsApp && smsGranted;
   int get mutedDefaultsCount => defaults.where((e) => e.silenced).length;
@@ -31,6 +33,7 @@ class AppState extends ChangeNotifier {
     await refreshStatus();
     await loadSilenceList();
     await loadConversations();
+    await loadFolders();
   }
 
   Future<void> loadThemeMode() async {
@@ -41,6 +44,33 @@ class AppState extends ChangeNotifier {
   void setMsgFilter(MsgFilter f) {
     msgFilter = f;
     notifyListeners();
+  }
+
+  void setActiveFolder(String? id) {
+    activeFolderId = id;
+    notifyListeners();
+  }
+
+  Future<void> loadFolders() async {
+    folders = await NativeBridge.getFolders();
+    notifyListeners();
+  }
+
+  Future<void> createFolder(String name) async {
+    await NativeBridge.createFolder(name);
+    await loadFolders();
+  }
+
+  Future<void> deleteFolder(String id) async {
+    if (activeFolderId == id) activeFolderId = null;
+    await NativeBridge.deleteFolder(id);
+    await loadFolders();
+  }
+
+  Future<void> addConversationsToFolder(
+      String folderId, List<String> addresses) async {
+    await NativeBridge.addToFolder(folderId, addresses);
+    await loadFolders();
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {

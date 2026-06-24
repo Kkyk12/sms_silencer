@@ -1,3 +1,19 @@
+/// A user-created chat folder that holds a set of conversation addresses.
+class Folder {
+  final String id;
+  final String name;
+  final List<String> addresses;
+
+  const Folder({required this.id, required this.name, required this.addresses});
+
+  factory Folder.fromMap(Map<String, dynamic> m) => Folder(
+        id: m['id'] as String,
+        name: m['name'] as String,
+        addresses:
+            ((m['addresses'] as List?) ?? []).map((e) => e.toString()).toList(),
+      );
+}
+
 /// A single received SMS, as read from the Android inbox via the native bridge.
 class SmsMessage {
   final String address;
