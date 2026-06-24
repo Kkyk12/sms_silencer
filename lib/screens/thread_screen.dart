@@ -777,14 +777,28 @@ class _Composer extends StatelessWidget {
                     decoration: InputDecoration(
                       hintText: 'Message…',
                       hintStyle: TextStyle(
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.6)),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.55)),
                       filled: false,
-                      isCollapsed: true,
-                      contentPadding: const EdgeInsets.only(
-                          left: 4, right: 4, bottom: 12, top: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(
+                            color: scheme.outlineVariant, width: 1.2),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(
+                            color: scheme.outlineVariant
+                                .withValues(alpha: 0.6),
+                            width: 1.2),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(
+                            color: scheme.primary.withValues(alpha: 0.7),
+                            width: 1.5),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
                     ),
                   ),
                 ),
