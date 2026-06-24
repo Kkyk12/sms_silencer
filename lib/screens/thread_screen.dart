@@ -794,8 +794,8 @@ class _Composer extends StatelessWidget {
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(28),
                         borderSide: BorderSide(
-                            color: scheme.primary.withValues(alpha: 0.7),
-                            width: 1.5),
+                            color: scheme.outlineVariant.withValues(alpha: 0.6),
+                            width: 1.2),
                       ),
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 12),
