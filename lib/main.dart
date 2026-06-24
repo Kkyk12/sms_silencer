@@ -535,7 +535,7 @@ class _DefaultAppBanner extends StatelessWidget {
             child: InkWell(
               onTap: () => context.read<AppState>().requestDefaultApp(),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
                 child: Row(
                   children: [
                     Icon(Icons.warning_amber_rounded,
@@ -548,16 +548,30 @@ class _DefaultAppBanner extends StatelessWidget {
                         style: TextStyle(color: scheme.onErrorContainer),
                       ),
                     ),
-                    Icon(Icons.chevron_right, color: scheme.onErrorContainer),
                   ],
                 ),
               ),
             ),
           ),
-          IconButton(
-            icon: Icon(Icons.close, size: 18, color: scheme.onErrorContainer),
-            tooltip: 'Dismiss',
-            onPressed: onDismiss,
+          // Clear, high-contrast dismiss button.
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Material(
+              color: scheme.onErrorContainer,
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: onDismiss,
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(
+                    Icons.close,
+                    size: 20,
+                    color: scheme.errorContainer,
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
