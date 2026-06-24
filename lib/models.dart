@@ -69,14 +69,17 @@ class SilenceList {
 /// One conversation thread (grouped by sender), for the inbox list.
 class Conversation {
   final String address;
-
-  /// Saved contact name, if the number is in Contacts (else null).
   final String? name;
   final String lastBody;
   final DateTime date;
   final int count;
   final int unread;
   final bool silenced;
+  final bool pinned;
+  final bool blocked;
+
+  /// content:// URI for the contact's thumbnail photo; null if no contact photo.
+  final String? photoUri;
 
   Conversation({
     required this.address,
@@ -86,9 +89,11 @@ class Conversation {
     required this.count,
     required this.unread,
     required this.silenced,
+    this.pinned = false,
+    this.blocked = false,
+    this.photoUri,
   });
 
-  /// What to show as the title: contact name when known, otherwise the number.
   String get displayName =>
       (name != null && name!.trim().isNotEmpty) ? name!.trim() : address;
 
@@ -102,8 +107,34 @@ class Conversation {
       count: (m['count'] as num?)?.toInt() ?? 0,
       unread: (m['unread'] as num?)?.toInt() ?? 0,
       silenced: (m['silenced'] as bool?) ?? false,
+      pinned: (m['pinned'] as bool?) ?? false,
+      blocked: (m['blocked'] as bool?) ?? false,
+      photoUri: m['photoUri'] as String?,
     );
   }
+}
+
+/// A message that is queued to be sent at a future time.
+class ScheduledMessage {
+  final String id;
+  final String address;
+  final String body;
+  final DateTime scheduledTime;
+
+  const ScheduledMessage({
+    required this.id,
+    required this.address,
+    required this.body,
+    required this.scheduledTime,
+  });
+
+  factory ScheduledMessage.fromMap(Map<String, dynamic> m) => ScheduledMessage(
+        id: (m['id'] as String?) ?? '',
+        address: (m['address'] as String?) ?? '',
+        body: (m['body'] as String?) ?? '',
+        scheduledTime: DateTime.fromMillisecondsSinceEpoch(
+            (m['timeMillis'] as num?)?.toInt() ?? 0),
+      );
 }
 
 /// A single message inside a thread (sent or received).

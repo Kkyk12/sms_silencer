@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -29,6 +31,13 @@ class AppState extends ChangeNotifier {
   List<Folder> folders = <Folder>[];
   String? activeFolderId;
 
+  Set<String> pinnedAddresses = <String>{};
+  Set<String> blockedAddresses = <String>{};
+  List<String> templates = <String>[];
+
+  /// Cached contact photo bytes keyed by conversation address.
+  final Map<String, Uint8List?> contactPhotos = <String, Uint8List?>{};
+
   bool get isReady => isDefaultSmsApp && smsGranted;
   int get mutedDefaultsCount => defaults.where((e) => e.silenced).length;
   int get activeSilencedCount => mutedDefaultsCount + custom.length;
@@ -39,6 +48,9 @@ class AppState extends ChangeNotifier {
     await loadSilenceList();
     await loadConversations();
     await loadFolders();
+    await loadPinned();
+    await loadBlocked();
+    await loadTemplates();
   }
 
   Future<void> loadThemeMode() async {
@@ -76,6 +88,82 @@ class AppState extends ChangeNotifier {
       String folderId, List<String> addresses) async {
     await NativeBridge.addToFolder(folderId, addresses);
     await loadFolders();
+  }
+
+  // ── Pinned ─────────────────────────────────────────────────────────────────
+
+  Future<void> loadPinned() async {
+    pinnedAddresses = (await NativeBridge.getPinned()).toSet();
+    notifyListeners();
+  }
+
+  bool isPinned(String address) => pinnedAddresses.contains(address);
+
+  Future<void> addPin(String address) async {
+    await NativeBridge.addPin(address);
+    pinnedAddresses.add(address);
+    notifyListeners();
+  }
+
+  Future<void> removePin(String address) async {
+    await NativeBridge.removePin(address);
+    pinnedAddresses.remove(address);
+    notifyListeners();
+  }
+
+  Future<void> togglePin(String address) async {
+    if (isPinned(address)) {
+      await removePin(address);
+    } else {
+      await addPin(address);
+    }
+  }
+
+  // ── Blocked ────────────────────────────────────────────────────────────────
+
+  Future<void> loadBlocked() async {
+    blockedAddresses = (await NativeBridge.getBlocked()).toSet();
+    notifyListeners();
+  }
+
+  bool isBlocked(String address) => blockedAddresses.contains(address);
+
+  Future<void> addBlocked(String address) async {
+    await NativeBridge.addBlocked(address);
+    blockedAddresses.add(address);
+    notifyListeners();
+  }
+
+  Future<void> removeBlocked(String address) async {
+    await NativeBridge.removeBlocked(address);
+    blockedAddresses.remove(address);
+    notifyListeners();
+  }
+
+  // ── Templates ──────────────────────────────────────────────────────────────
+
+  Future<void> loadTemplates() async {
+    templates = await NativeBridge.getTemplates();
+    notifyListeners();
+  }
+
+  Future<void> saveTemplates(List<String> newTemplates) async {
+    templates = newTemplates;
+    notifyListeners();
+    await NativeBridge.saveTemplates(newTemplates);
+  }
+
+  // ── Contact photos ─────────────────────────────────────────────────────────
+
+  void _preloadPhotos() {
+    for (final c in conversations) {
+      if (c.photoUri != null && !contactPhotos.containsKey(c.address)) {
+        NativeBridge.getContactPhotoBytes(c.photoUri!).then((bytes) {
+          contactPhotos[c.address] = bytes;
+          notifyListeners();
+        });
+      }
+    }
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
@@ -216,5 +304,6 @@ class AppState extends ChangeNotifier {
     }
     loadingConversations = false;
     notifyListeners();
+    _preloadPhotos();
   }
 }

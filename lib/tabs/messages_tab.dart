@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -36,6 +38,51 @@ class _MessagesTabState extends State<MessagesTab> {
     final addresses = _selected.toList();
     await context.read<AppState>().silenceMany(addresses);
     if (mounted) setState(_selected.clear);
+  }
+
+  Future<void> _pinSelected() async {
+    final state = context.read<AppState>();
+    // If any selected are unpinned, pin them all; otherwise unpin all.
+    final anyUnpinned = _selected.any((a) => !state.isPinned(a));
+    for (final a in _selected) {
+      if (anyUnpinned) {
+        await state.addPin(a);
+      } else {
+        await state.removePin(a);
+      }
+    }
+    if (mounted) setState(_selected.clear);
+  }
+
+  Future<void> _blockSelected() async {
+    final state = context.read<AppState>();
+    final n = _selected.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Block $n sender${n == 1 ? '' : 's'}?'),
+        content: const Text(
+          'New messages from these numbers will be silently dropped. '
+          'Existing conversations are kept.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      for (final a in _selected) {
+        await state.addBlocked(a);
+      }
+      if (mounted) setState(_selected.clear);
+    }
   }
 
   Future<void> _deleteSelected() async {
@@ -203,7 +250,7 @@ class _MessagesTabState extends State<MessagesTab> {
 
     final all = state.conversations;
 
-    final List<Conversation> list;
+    List<Conversation> list;
     final activeFolderId = state.activeFolderId;
     if (activeFolderId != null) {
       final folder = state.folders.where((f) => f.id == activeFolderId).firstOrNull;
@@ -220,6 +267,13 @@ class _MessagesTabState extends State<MessagesTab> {
         MsgFilter.rings => all.where((c) => !c.silenced).toList(),
       };
     }
+
+    // Pinned conversations float to the top.
+    list = [...list]..sort((a, b) {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return 0;
+      });
 
     return Column(
       children: [
@@ -258,10 +312,12 @@ class _MessagesTabState extends State<MessagesTab> {
                         ),
                         itemBuilder: (_, i) {
                           final c = list[i];
+                          final photo = state.contactPhotos[c.address];
                           return _ConversationTile(
                             convo: c,
                             selecting: _selecting,
                             selected: _selected.contains(c.address),
+                            contactPhoto: photo,
                             onTap: () => _selecting ? _toggle(c) : _open(c),
                             onLongPress: () => _toggle(c),
                           );
@@ -274,6 +330,8 @@ class _MessagesTabState extends State<MessagesTab> {
   }
 
   Widget _selectionBar(ColorScheme scheme, List<Conversation> list) {
+    final state = context.watch<AppState>();
+    final anyUnpinned = _selected.any((a) => !state.isPinned(a));
     return Container(
       color: AppColors.primary.withValues(alpha: 0.08),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -295,6 +353,16 @@ class _MessagesTabState extends State<MessagesTab> {
             onPressed: () => setState(
               () => _selected.addAll(list.map((c) => c.address)),
             ),
+          ),
+          IconButton(
+            icon: Icon(anyUnpinned ? Icons.push_pin_outlined : Icons.push_pin),
+            tooltip: anyUnpinned ? 'Pin' : 'Unpin',
+            onPressed: _pinSelected,
+          ),
+          IconButton(
+            icon: const Icon(Icons.block_outlined),
+            tooltip: 'Block',
+            onPressed: _blockSelected,
           ),
           IconButton(
             icon: const Icon(Icons.folder_outlined),
@@ -484,6 +552,7 @@ class _ConversationTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onLongPress,
+    this.contactPhoto,
   });
 
   final Conversation convo;
@@ -491,11 +560,14 @@ class _ConversationTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final Uint8List? contactPhoto;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final silenced = convo.silenced;
+    final blocked = convo.blocked;
+    final pinned = convo.pinned;
     final unread = convo.unread > 0;
 
     return InkWell(
@@ -514,14 +586,19 @@ class _ConversationTile extends StatelessWidget {
                   CircleAvatar(
                     radius: 26,
                     backgroundColor: scheme.surfaceContainerHighest,
-                    child: Text(
-                      _initial(convo.displayName),
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 18,
-                      ),
-                    ),
+                    backgroundImage: contactPhoto != null
+                        ? MemoryImage(contactPhoto!)
+                        : null,
+                    child: contactPhoto == null
+                        ? Text(
+                            _initial(convo.displayName),
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 18,
+                            ),
+                          )
+                        : null,
                   ),
                   if (selected)
                     Positioned(
@@ -548,6 +625,12 @@ class _ConversationTile extends StatelessWidget {
                 children: [
                   Row(
                     children: [
+                      if (pinned)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Icon(Icons.push_pin,
+                              size: 13, color: AppColors.primary),
+                        ),
                       Expanded(
                         child: Text(
                           convo.displayName,
@@ -576,28 +659,36 @@ class _ConversationTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      if (silenced) ...[
+                      if (blocked) ...[
+                        Icon(Icons.block,
+                            size: 14, color: scheme.error),
+                        const SizedBox(width: 4),
+                      ] else if (silenced) ...[
                         Icon(Icons.notifications_off,
                             size: 14, color: scheme.onSurfaceVariant),
                         const SizedBox(width: 4),
                       ],
                       Expanded(
                         child: Text(
-                          convo.lastBody.replaceAll('\n', ' '),
+                          blocked
+                              ? 'Blocked'
+                              : convo.lastBody.replaceAll('\n', ' '),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 13,
                             height: 1.25,
-                            color: unread
-                                ? scheme.onSurface
-                                : scheme.onSurfaceVariant,
+                            color: blocked
+                                ? scheme.error
+                                : unread
+                                    ? scheme.onSurface
+                                    : scheme.onSurfaceVariant,
                             fontWeight:
                                 unread ? FontWeight.w500 : FontWeight.normal,
                           ),
                         ),
                       ),
-                      if (unread) ...[
+                      if (unread && !blocked) ...[
                         const SizedBox(width: 10),
                         Container(
                           padding: const EdgeInsets.symmetric(

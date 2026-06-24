@@ -147,6 +147,107 @@ object Prefs {
         })
     }
 
+    // ── Pinned addresses ─────────────────────────────────────────────────────
+
+    private const val KEY_PINNED = "pinned_addresses"
+
+    fun getPinned(context: Context): Set<String> = getSet(context, KEY_PINNED).toSet()
+
+    fun addPinned(context: Context, address: String) {
+        val set = getSet(context, KEY_PINNED)
+        set.add(address.trim())
+        putSet(context, KEY_PINNED, set)
+    }
+
+    fun removePinned(context: Context, address: String) {
+        val set = getSet(context, KEY_PINNED)
+        set.remove(address.trim())
+        putSet(context, KEY_PINNED, set)
+    }
+
+    fun isPinned(context: Context, address: String): Boolean =
+        getSet(context, KEY_PINNED).contains(address.trim())
+
+    // ── Blocked addresses ────────────────────────────────────────────────────
+
+    private const val KEY_BLOCKED = "blocked_addresses"
+
+    fun getBlocked(context: Context): List<String> =
+        getSet(context, KEY_BLOCKED).toList().sortedBy { it.lowercase() }
+
+    fun addBlocked(context: Context, address: String) {
+        val set = getSet(context, KEY_BLOCKED)
+        set.add(address.trim())
+        putSet(context, KEY_BLOCKED, set)
+    }
+
+    fun removeBlocked(context: Context, address: String) {
+        val set = getSet(context, KEY_BLOCKED)
+        set.remove(address.trim())
+        putSet(context, KEY_BLOCKED, set)
+    }
+
+    fun isBlocked(context: Context, sender: String): Boolean {
+        val s = sender.trim()
+        if (s.isEmpty()) return false
+        return getSet(context, KEY_BLOCKED).any { matches(it, s) }
+    }
+
+    // ── Quick reply templates ────────────────────────────────────────────────
+
+    private const val KEY_TEMPLATES = "quick_reply_templates"
+
+    fun getTemplates(context: Context): List<String> {
+        val json = prefs(context).getString(KEY_TEMPLATES, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { arr.getString(it) }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun saveTemplates(context: Context, templates: List<String>) {
+        val arr = JSONArray()
+        templates.forEach { arr.put(it) }
+        prefs(context).edit().putString(KEY_TEMPLATES, arr.toString()).apply()
+    }
+
+    // ── Scheduled messages ───────────────────────────────────────────────────
+
+    private const val KEY_SCHEDULED = "scheduled_messages"
+
+    data class ScheduledMsg(val id: String, val address: String, val body: String, val timeMillis: Long)
+
+    fun getScheduled(context: Context): List<ScheduledMsg> {
+        val json = prefs(context).getString(KEY_SCHEDULED, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                ScheduledMsg(obj.getString("id"), obj.getString("address"), obj.getString("body"), obj.getLong("time"))
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun addScheduled(context: Context, msg: ScheduledMsg) {
+        val list = getScheduled(context).toMutableList()
+        list.add(msg)
+        saveScheduledList(context, list)
+    }
+
+    fun removeScheduled(context: Context, id: String) {
+        saveScheduledList(context, getScheduled(context).filter { it.id != id })
+    }
+
+    private fun saveScheduledList(context: Context, list: List<ScheduledMsg>) {
+        val arr = JSONArray()
+        list.forEach { m ->
+            arr.put(JSONObject().apply {
+                put("id", m.id); put("address", m.address); put("body", m.body); put("time", m.timeMillis)
+            })
+        }
+        prefs(context).edit().putString(KEY_SCHEDULED, arr.toString()).apply()
+    }
+
     /**
      * Match a list entry against an incoming sender.
      *  - Alphanumeric sender IDs (e.g. "Safaricom"): case-insensitive exact match.

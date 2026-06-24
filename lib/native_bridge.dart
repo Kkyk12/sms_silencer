@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 
 import 'models.dart';
@@ -155,5 +157,75 @@ class NativeBridge {
       String folderId, List<String> addresses) {
     return _channel.invokeMethod<void>(
         'addToFolder', {'folderId': folderId, 'addresses': addresses});
+  }
+
+  // ── Pinned ────────────────────────────────────────────────────────────────
+
+  static Future<List<String>> getPinned() async {
+    final raw = await _channel.invokeListMethod<dynamic>('getPinned');
+    return raw?.map((e) => e.toString()).toList() ?? [];
+  }
+
+  static Future<void> addPin(String address) =>
+      _channel.invokeMethod<void>('addPin', {'address': address});
+
+  static Future<void> removePin(String address) =>
+      _channel.invokeMethod<void>('removePin', {'address': address});
+
+  // ── Blocked ───────────────────────────────────────────────────────────────
+
+  static Future<List<String>> getBlocked() async {
+    final raw = await _channel.invokeListMethod<dynamic>('getBlocked');
+    return raw?.map((e) => e.toString()).toList() ?? [];
+  }
+
+  static Future<void> addBlocked(String address) =>
+      _channel.invokeMethod<void>('addBlocked', {'address': address});
+
+  static Future<void> removeBlocked(String address) =>
+      _channel.invokeMethod<void>('removeBlocked', {'address': address});
+
+  // ── Quick reply templates ─────────────────────────────────────────────────
+
+  static Future<List<String>> getTemplates() async {
+    final raw = await _channel.invokeListMethod<dynamic>('getTemplates');
+    return raw?.map((e) => e.toString()).toList() ?? [];
+  }
+
+  static Future<void> saveTemplates(List<String> templates) =>
+      _channel.invokeMethod<void>('saveTemplates', {'templates': templates});
+
+  // ── Scheduled messages ────────────────────────────────────────────────────
+
+  static Future<String> scheduleMessage(
+      String address, String body, int timeMillis) async {
+    return (await _channel.invokeMethod<String>(
+          'scheduleMessage',
+          {'address': address, 'body': body, 'timeMillis': timeMillis},
+        )) ??
+        '';
+  }
+
+  static Future<void> cancelScheduledMessage(String msgId) =>
+      _channel.invokeMethod<void>('cancelScheduledMessage', {'msgId': msgId});
+
+  static Future<List<ScheduledMessage>> getScheduledMessages(
+      String address) async {
+    final raw =
+        await _channel.invokeListMethod<dynamic>('getScheduledMessages');
+    if (raw == null) return [];
+    return raw
+        .map((e) =>
+            ScheduledMessage.fromMap(Map<String, dynamic>.from(e as Map)))
+        .where((m) => m.address == address || address.isEmpty)
+        .toList();
+  }
+
+  // ── Contact photos ────────────────────────────────────────────────────────
+
+  static Future<Uint8List?> getContactPhotoBytes(String photoUri) async {
+    final bytes = await _channel.invokeMethod<Uint8List>(
+        'getContactPhotoBytes', {'photoUri': photoUri});
+    return bytes;
   }
 }

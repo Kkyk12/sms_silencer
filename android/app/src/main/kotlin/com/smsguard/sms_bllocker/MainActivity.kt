@@ -1,11 +1,14 @@
 package com.smsguard.sms_bllocker
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.app.role.RoleManager
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
 import android.provider.Telephony
@@ -200,6 +203,84 @@ class MainActivity : FlutterActivity() {
                         }
                     }
 
+                    // ── Pinned ────────────────────────────────────────────────
+                    "getPinned" -> result.success(Prefs.getPinned(this).toList())
+
+                    "addPin" -> {
+                        val address = call.argument<String>("address")
+                        if (address.isNullOrBlank()) result.error("ARG", "address required", null)
+                        else { Prefs.addPinned(this, address); result.success(null) }
+                    }
+
+                    "removePin" -> {
+                        val address = call.argument<String>("address")
+                        if (address.isNullOrBlank()) result.error("ARG", "address required", null)
+                        else { Prefs.removePinned(this, address); result.success(null) }
+                    }
+
+                    // ── Blocked ───────────────────────────────────────────────
+                    "getBlocked" -> result.success(Prefs.getBlocked(this))
+
+                    "addBlocked" -> {
+                        val address = call.argument<String>("address")
+                        if (address.isNullOrBlank()) result.error("ARG", "address required", null)
+                        else { Prefs.addBlocked(this, address); result.success(null) }
+                    }
+
+                    "removeBlocked" -> {
+                        val address = call.argument<String>("address")
+                        if (address.isNullOrBlank()) result.error("ARG", "address required", null)
+                        else { Prefs.removeBlocked(this, address); result.success(null) }
+                    }
+
+                    // ── Templates ─────────────────────────────────────────────
+                    "getTemplates" -> result.success(Prefs.getTemplates(this))
+
+                    "saveTemplates" -> {
+                        val templates = call.argument<List<String>>("templates")
+                        if (templates == null) result.error("ARG", "templates required", null)
+                        else { Prefs.saveTemplates(this, templates); result.success(null) }
+                    }
+
+                    // ── Scheduled messages ────────────────────────────────────
+                    "scheduleMessage" -> {
+                        val address = call.argument<String>("address")
+                        val body = call.argument<String>("body")
+                        val timeMillis = call.argument<Number>("timeMillis")?.toLong()
+                        if (address.isNullOrBlank() || body == null || timeMillis == null) {
+                            result.error("ARG", "address, body, timeMillis required", null)
+                        } else {
+                            val msgId = System.currentTimeMillis().toString() + "_" + (Math.random() * 10000).toInt()
+                            val msg = Prefs.ScheduledMsg(msgId, address, body, timeMillis)
+                            Prefs.addScheduled(this, msg)
+                            val am = getSystemService(AlarmManager::class.java)
+                            if (am != null) BootReceiver.scheduleAlarm(this, am, msgId, timeMillis)
+                            result.success(msgId)
+                        }
+                    }
+
+                    "cancelScheduledMessage" -> {
+                        val msgId = call.argument<String>("msgId")
+                        if (msgId.isNullOrBlank()) result.error("ARG", "msgId required", null)
+                        else {
+                            Prefs.removeScheduled(this, msgId)
+                            BootReceiver.cancelAlarm(this, msgId)
+                            result.success(null)
+                        }
+                    }
+
+                    "getScheduledMessages" -> result.success(
+                        Prefs.getScheduled(this).map { m ->
+                            hashMapOf("id" to m.id, "address" to m.address, "body" to m.body, "timeMillis" to m.timeMillis)
+                        }
+                    )
+
+                    // ── Contact photo ─────────────────────────────────────────
+                    "getContactPhotoBytes" -> {
+                        val photoUri = call.argument<String>("photoUri")
+                        result.success(if (photoUri.isNullOrBlank()) null else getContactPhotoBytes(photoUri))
+                    }
+
                     else -> result.notImplemented()
                 }
             }
@@ -321,41 +402,52 @@ class MainActivity : FlutterActivity() {
         return if (digits.length >= 7) digits.takeLast(10) else address.trim().lowercase()
     }
 
-    /** Map of normalized phone number -> saved contact name (needs READ_CONTACTS). */
-    private fun loadContactMap(): Map<String, String> {
-        val map = HashMap<String, String>()
+    /** name map and photo-URI map, keyed by normalized number. */
+    private fun loadContactMaps(): Pair<Map<String, String>, Map<String, String?>> {
+        val names = HashMap<String, String>()
+        val photos = HashMap<String, String?>()
         try {
             val cursor = contentResolver.query(
                 ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
                 arrayOf(
                     ContactsContract.CommonDataKinds.Phone.NUMBER,
                     ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.Contacts.PHOTO_THUMBNAIL_URI,
                 ),
                 null, null, null,
             )
             cursor?.use { c ->
                 val iNum = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
                 val iName = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val iPhoto = c.getColumnIndex(ContactsContract.Contacts.PHOTO_THUMBNAIL_URI)
                 while (c.moveToNext()) {
                     val num = if (iNum >= 0) c.getString(iNum) else null
                     val name = if (iName >= 0) c.getString(iName) else null
                     if (!num.isNullOrBlank() && !name.isNullOrBlank()) {
-                        map.putIfAbsent(convKey(num), name)
+                        val key = convKey(num)
+                        if (!names.containsKey(key)) {
+                            names[key] = name
+                            photos[key] = if (iPhoto >= 0) c.getString(iPhoto) else null
+                        }
                     }
                 }
             }
-        } catch (_: Exception) {
-        }
-        return map
+        } catch (_: Exception) {}
+        return Pair(names, photos)
     }
 
     /** Saved contact name for one address, or null. */
-    private fun contactName(address: String): String? = loadContactMap()[convKey(address)]
+    private fun contactName(address: String): String? = loadContactMaps().first[convKey(address)]
+
+    /** Read raw bytes from a content:// photo thumbnail URI. */
+    private fun getContactPhotoBytes(photoUri: String): ByteArray? = try {
+        contentResolver.openInputStream(Uri.parse(photoUri))?.use { it.readBytes() }
+    } catch (_: Exception) { null }
 
     /** One entry per conversation (latest first), with snippet + unread count. */
     private fun conversations(): List<Map<String, Any?>> {
         val order = LinkedHashMap<String, HashMap<String, Any?>>()
-        val contacts = loadContactMap()
+        val (contacts, photos) = loadContactMaps()
         val cursor = contentResolver.query(
             Telephony.Sms.CONTENT_URI,
             arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ),
@@ -382,6 +474,9 @@ class MainActivity : FlutterActivity() {
                         "count" to 1,
                         "unread" to (if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && read == 0) 1 else 0),
                         "silenced" to Prefs.isSilenced(this, addr),
+                        "pinned" to Prefs.isPinned(this, addr),
+                        "blocked" to Prefs.isBlocked(this, addr),
+                        "photoUri" to photos[key],
                     )
                 } else {
                     existing["count"] = (existing["count"] as Int) + 1

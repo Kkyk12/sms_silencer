@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -21,9 +23,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
   final _scroll = ScrollController();
   List<ThreadMessage> _messages = [];
   List<SimInfo> _sims = [];
+  List<ScheduledMessage> _scheduled = [];
   bool _loading = true;
   bool _sending = false;
   String? _name;
+  Uint8List? _contactPhoto;
 
   String get _displayName =>
       (_name != null && _name!.trim().isNotEmpty) ? _name!.trim() : widget.address;
@@ -65,11 +69,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
   Future<void> _load() async {
     final msgs = await NativeBridge.getThread(widget.address);
     final name = await NativeBridge.getContactName(widget.address);
+    final scheduled =
+        await NativeBridge.getScheduledMessages(widget.address);
     await NativeBridge.markRead(widget.address);
     if (!mounted) return;
+    // Load contact photo from cache or fetch
+    final state = context.read<AppState>();
+    Uint8List? photo = state.contactPhotos[widget.address];
     setState(() {
       _messages = msgs;
+      _scheduled = scheduled;
       _name = name;
+      _contactPhoto = photo;
       _loading = false;
     });
     _scrollToBottom();
@@ -98,60 +109,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
       );
     }
     if (mounted) setState(() => _sending = false);
-  }
-
-  /// Long-press the send button: pick which SIM to send on (dual-SIM only).
-  Future<void> _pickSimAndSend() async {
-    if (_input.text.trim().isEmpty) return;
-    if (_sims.length < 2) {
-      _send();
-      return;
-    }
-    final scheme = Theme.of(context).colorScheme;
-    final chosen = await showModalBottomSheet<int>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-              child: Text(
-                'Send with',
-                style: Theme.of(ctx)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-            ..._sims.map(
-              (s) => ListTile(
-                leading: CircleAvatar(
-                  radius: 16,
-                  backgroundColor: AppColors.primary.withValues(alpha: 0.14),
-                  child: Text(
-                    '${s.slot + 1}',
-                    style: const TextStyle(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                title: Text(s.label),
-                subtitle: Text(s.shortLabel,
-                    style: TextStyle(color: scheme.onSurfaceVariant)),
-                onTap: () => Navigator.pop(ctx, s.subId),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (chosen != null) _send(subId: chosen);
   }
 
   Future<void> _deleteMessage(ThreadMessage m) async {
@@ -185,12 +142,271 @@ class _ThreadScreenState extends State<ThreadScreen> {
     );
   }
 
+  void _togglePin() {
+    context.read<AppState>().togglePin(widget.address);
+    final pinned = context.read<AppState>().isPinned(widget.address);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(pinned
+              ? '$_displayName pinned.'
+              : '$_displayName unpinned.')),
+    );
+    setState(() {}); // rebuild to update menu icon
+  }
+
+  Future<void> _toggleBlock() async {
+    final state = context.read<AppState>();
+    final blocked = state.isBlocked(widget.address);
+    if (!blocked) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Block $_displayName?'),
+          content: const Text(
+            'New messages from this number will be silently dropped. '
+            'You can unblock from this menu.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Block'),
+            ),
+          ],
+        ),
+      );
+      if (ok == true && mounted) {
+        await state.addBlocked(widget.address);
+        if (mounted) setState(() {});
+      }
+    } else {
+      await state.removeBlocked(widget.address);
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$_displayName unblocked.')),
+        );
+      }
+    }
+  }
+
+  /// Show a bottom sheet with saved quick-reply templates.
+  Future<void> _showTemplates() async {
+    final state = context.read<AppState>();
+    if (state.templates.isEmpty) {
+      await _editTemplates();
+      return;
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Quick replies',
+                        style: Theme.of(ctx)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _editTemplates();
+                      },
+                      child: const Text('Edit'),
+                    ),
+                  ],
+                ),
+              ),
+              ...state.templates.map(
+                (t) => ListTile(
+                  title: Text(t, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _input.text = t;
+                    _input.selection = TextSelection.fromPosition(
+                        TextPosition(offset: t.length));
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Edit the template list.
+  Future<void> _editTemplates() async {
+    final state = context.read<AppState>();
+    final templates = List<String>.from(state.templates);
+    final result = await showDialog<List<String>>(
+      context: context,
+      builder: (ctx) => _TemplateEditor(templates: templates),
+    );
+    if (result != null && mounted) {
+      await state.saveTemplates(result);
+    }
+  }
+
+  /// Schedule the current composer text to be sent at a chosen time.
+  Future<void> _scheduleMessage() async {
+    final text = _input.text.trim();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Type a message first.')),
+      );
+      return;
+    }
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+    );
+    if (time == null || !mounted) return;
+    final scheduled = DateTime(
+        date.year, date.month, date.day, time.hour, time.minute);
+    if (scheduled.isBefore(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick a future time.')),
+      );
+      return;
+    }
+    await NativeBridge.scheduleMessage(
+        widget.address, text, scheduled.millisecondsSinceEpoch);
+    _input.clear();
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Scheduled for ${DateFormat('MMM d, h:mm a').format(scheduled)}.'),
+        ),
+      );
+    }
+  }
+
+  /// Long-press send: show combined options for scheduling and SIM selection.
+  Future<void> _showSendOptions() async {
+    if (_input.text.trim().isEmpty) return;
+    final scheme = Theme.of(context).colorScheme;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Text(
+                'Send options',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.send_rounded),
+              title: const Text('Send now'),
+              onTap: () { Navigator.pop(ctx); _send(); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.schedule_outlined),
+              title: const Text('Schedule send'),
+              onTap: () { Navigator.pop(ctx); _scheduleMessage(); },
+            ),
+            if (_sims.length >= 2) ...[
+              const Divider(height: 1, indent: 16, endIndent: 16),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Text('Send with SIM',
+                    style: TextStyle(
+                        fontSize: 12, color: scheme.onSurfaceVariant)),
+              ),
+              ..._sims.map(
+                (s) => ListTile(
+                  leading: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppColors.primary.withValues(alpha: 0.14),
+                    child: Text('${s.slot + 1}',
+                        style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13)),
+                  ),
+                  title: Text(s.label),
+                  subtitle: Text(s.shortLabel,
+                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                  onTap: () { Navigator.pop(ctx); _send(subId: s.subId); },
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelScheduled(ScheduledMessage m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel scheduled message?'),
+        content: Text(m.body, maxLines: 3, overflow: TextOverflow.ellipsis),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await NativeBridge.cancelScheduledMessage(m.id);
+      await _load();
+    }
+  }
+
   static bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final state = context.watch<AppState>();
+    final pinned = state.isPinned(widget.address);
+    final blocked = state.isBlocked(widget.address);
 
     return Scaffold(
       appBar: AppBar(
@@ -200,14 +416,19 @@ class _ThreadScreenState extends State<ThreadScreen> {
             CircleAvatar(
               radius: 19,
               backgroundColor: scheme.surfaceContainerHighest,
-              child: Text(
-                _initial(_displayName),
-                style: TextStyle(
-                  color: scheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                ),
-              ),
+              backgroundImage: _contactPhoto != null
+                  ? MemoryImage(_contactPhoto!)
+                  : null,
+              child: _contactPhoto == null
+                  ? Text(
+                      _initial(_displayName),
+                      style: TextStyle(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    )
+                  : null,
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -242,10 +463,29 @@ class _ThreadScreenState extends State<ThreadScreen> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (v) {
-              if (v == 'silence') _silenceSender();
+              switch (v) {
+                case 'silence':
+                  _silenceSender();
+                case 'pin':
+                  _togglePin();
+                case 'block':
+                  _toggleBlock();
+                case 'templates':
+                  _editTemplates();
+              }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'silence', child: Text('Silence sender')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                  value: 'silence', child: Text('Silence sender')),
+              PopupMenuItem(
+                  value: 'pin',
+                  child: Text(pinned ? 'Unpin conversation' : 'Pin conversation')),
+              PopupMenuItem(
+                  value: 'block',
+                  child: Text(blocked ? 'Unblock number' : 'Block number')),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                  value: 'templates', child: Text('Edit quick replies')),
             ],
           ),
         ],
@@ -326,11 +566,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
                         ),
             ),
           ),
+          if (_scheduled.isNotEmpty)
+            _ScheduledSection(
+                scheduled: _scheduled, onCancel: _cancelScheduled),
           _Composer(
             controller: _input,
             sending: _sending,
             onSend: _send,
-            onLongPressSend: _sims.length >= 2 ? _pickSimAndSend : null,
+            onLongPressSend: _showSendOptions,
+            onTemplate: _showTemplates,
           ),
         ],
       ),
@@ -480,13 +724,14 @@ class _Composer extends StatelessWidget {
     required this.sending,
     required this.onSend,
     this.onLongPressSend,
+    this.onTemplate,
   });
 
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
-  // Long-press the send button to choose a SIM (dual-SIM only); null disables.
   final VoidCallback? onLongPressSend;
+  final VoidCallback? onTemplate;
 
   @override
   Widget build(BuildContext context) {
@@ -494,7 +739,7 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
         decoration: BoxDecoration(
           color: scheme.surface,
           border: Border(
@@ -506,6 +751,14 @@ class _Composer extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            // Quick reply template button
+            IconButton(
+              icon: Icon(Icons.format_quote_outlined,
+                  color: scheme.onSurfaceVariant),
+              tooltip: 'Quick replies',
+              onPressed: onTemplate,
+              padding: const EdgeInsets.all(10),
+            ),
             Expanded(
               child: Container(
                 constraints: const BoxConstraints(minHeight: 46),
@@ -522,8 +775,7 @@ class _Composer extends StatelessWidget {
                   style: const TextStyle(fontSize: 15),
                   decoration: InputDecoration(
                     hintText: 'Message…',
-                    hintStyle:
-                        TextStyle(color: scheme.onSurfaceVariant),
+                    hintStyle: TextStyle(color: scheme.onSurfaceVariant),
                     border: InputBorder.none,
                     filled: false,
                     isCollapsed: true,
@@ -569,6 +821,175 @@ class _Composer extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Scheduled messages section ─────────────────────────────────────────────────
+
+class _ScheduledSection extends StatelessWidget {
+  const _ScheduledSection(
+      {required this.scheduled, required this.onCancel});
+
+  final List<ScheduledMessage> scheduled;
+  final void Function(ScheduledMessage) onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      color: scheme.surfaceContainerLow,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+            child: Row(
+              children: [
+                Icon(Icons.schedule_outlined,
+                    size: 14, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Text(
+                  'Scheduled',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ...scheduled.map(
+            (m) => InkWell(
+              onTap: () => onCancel(m),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        m.body,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 13, color: scheme.onSurfaceVariant),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      DateFormat('MMM d, h:mm a').format(m.scheduledTime),
+                      style: TextStyle(
+                          fontSize: 11, color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(Icons.close, size: 16, color: scheme.onSurfaceVariant),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Template editor dialog ─────────────────────────────────────────────────────
+
+class _TemplateEditor extends StatefulWidget {
+  const _TemplateEditor({required this.templates});
+
+  final List<String> templates;
+
+  @override
+  State<_TemplateEditor> createState() => _TemplateEditorState();
+}
+
+class _TemplateEditorState extends State<_TemplateEditor> {
+  late final List<String> _items;
+  final _ctrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List.from(widget.templates);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _add() {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _items.add(text));
+    _ctrl.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Quick replies'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_items.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _items.length,
+                  itemBuilder: (_, i) => ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(_items[i],
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      onPressed: () =>
+                          setState(() => _items.removeAt(i)),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _ctrl,
+                    decoration: const InputDecoration(
+                      hintText: 'Add a quick reply…',
+                    ),
+                    onSubmitted: (_) => _add(),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: _add,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _items),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

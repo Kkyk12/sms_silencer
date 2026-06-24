@@ -26,6 +26,9 @@ class SmsReceiver : BroadcastReceiver() {
         val body = parts.joinToString("") { it.displayMessageBody ?: it.messageBody ?: "" }
         val timestamp = parts[0].timestampMillis
 
+        // Blocked senders: drop silently — no storage, no notification.
+        if (Prefs.isBlocked(context, sender)) return
+
         // The default SMS app is responsible for storing messages in the provider.
         persistToInbox(context, sender, body, timestamp)
 
