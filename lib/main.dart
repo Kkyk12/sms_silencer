@@ -105,6 +105,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   StreamSubscription<Map<String, dynamic>>? _smsSub;
   OverlayEntry? _banner;
+  bool _defaultBannerDismissed = false;
 
   @override
   void initState() {
@@ -132,6 +133,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       context.read<AppState>().refreshOnResume();
+      // Some phones take a moment to update the default SMS app registry.
+      // Retry a few times so the red banner disappears promptly.
+      for (final ms in [600, 1500, 3500]) {
+        Future.delayed(Duration(milliseconds: ms), () {
+          if (mounted) context.read<AppState>().refreshStatus();
+        });
+      }
     }
   }
 
@@ -334,7 +342,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          if (!state.isDefaultSmsApp) const _DefaultAppBanner(),
+          if (!state.isDefaultSmsApp && !_defaultBannerDismissed)
+            _DefaultAppBanner(
+              onDismiss: () => setState(() => _defaultBannerDismissed = true),
+            ),
           Expanded(
             child: IndexedStack(
               index: _index,
@@ -509,32 +520,46 @@ class _SmsBannerState extends State<_SmsBanner>
 
 /// Persistent reminder shown until the app is set as the default SMS app.
 class _DefaultAppBanner extends StatelessWidget {
-  const _DefaultAppBanner();
+  const _DefaultAppBanner({required this.onDismiss});
+
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
       color: scheme.errorContainer,
-      child: InkWell(
-        onTap: () => context.read<AppState>().requestDefaultApp(),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: scheme.onErrorContainer),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Filtering is off. Tap to set SMS Guard as your default '
-                  'messaging app.',
-                  style: TextStyle(color: scheme.onErrorContainer),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: () => context.read<AppState>().requestDefaultApp(),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: scheme.onErrorContainer),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Filtering is off. Tap to set SMS Guard as your '
+                        'default messaging app.',
+                        style: TextStyle(color: scheme.onErrorContainer),
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, color: scheme.onErrorContainer),
+                  ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: scheme.onErrorContainer),
-            ],
+            ),
           ),
-        ),
+          IconButton(
+            icon: Icon(Icons.close, size: 18, color: scheme.onErrorContainer),
+            tooltip: 'Dismiss',
+            onPressed: onDismiss,
+          ),
+        ],
       ),
     );
   }
