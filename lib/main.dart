@@ -115,13 +115,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await Future<void>.delayed(const Duration(milliseconds: 800));
       if (!mounted) return;
+      // Read the launch address first — before any dialogs that could steal focus
+      // or cause some devices to clear intent extras on the next resume.
+      final addr = await NativeBridge.getInitialAddress();
+
       final st = context.read<AppState>();
       await st.ensureStartupPermissions();
 
-      // If we were launched from "Send message" on a contact, open that thread.
-      final addr = await NativeBridge.getInitialAddress();
       if (addr != null && addr.isNotEmpty && mounted) {
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ThreadScreen(address: addr)),
@@ -129,7 +130,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         return; // skip the default-app prompt when opened from the dialer
       }
 
-      await st.autoPromptDefaultIfNeeded();
+      if (mounted) await st.autoPromptDefaultIfNeeded();
     });
     _smsSub = NativeBridge.smsEvents.listen(_onSmsArrived);
   }

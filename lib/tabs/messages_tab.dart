@@ -85,6 +85,14 @@ class _MessagesTabState extends State<MessagesTab> {
     }
   }
 
+  Future<void> _markSelectedRead() async {
+    final state = context.read<AppState>();
+    for (final a in _selected) {
+      await state.markRead(a);
+    }
+    if (mounted) setState(_selected.clear);
+  }
+
   Future<void> _deleteSelected() async {
     final n = _selected.length;
     final ok = await showDialog<bool>(
@@ -373,6 +381,11 @@ class _MessagesTabState extends State<MessagesTab> {
             icon: const Icon(Icons.notifications_off_outlined),
             tooltip: 'Silence',
             onPressed: _silenceSelected,
+          ),
+          IconButton(
+            icon: const Icon(Icons.mark_email_read_outlined),
+            tooltip: 'Mark as read',
+            onPressed: _markSelectedRead,
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),

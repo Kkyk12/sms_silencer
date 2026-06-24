@@ -299,9 +299,11 @@ class MainActivity : FlutterActivity() {
 
                     // ── Default SMS SIM ───────────────────────────────────────
                     "getDefaultSmsSubId" -> result.success(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1)
-                            SubscriptionManager.getDefaultSmsSubscriptionId()
-                        else -1
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1)
+                                SubscriptionManager.getDefaultSmsSubscriptionId()
+                            else -1
+                        } catch (_: Exception) { -1 }
                     )
 
                     else -> result.notImplemented()
@@ -311,7 +313,7 @@ class MainActivity : FlutterActivity() {
 
     /**
      * Extract a phone number/address from an intent sent by the phone dialer or
-     * another app. Handles sms:/smsto:/mms:/mmsto: URIs and plain EXTRA_TEXT numbers.
+     * another app. Handles sms:/smsto:/mms:/mmsto: URIs and plain extras.
      */
     private fun addressFromIntent(i: Intent?): String? {
         if (i == null) return null
@@ -319,15 +321,33 @@ class MainActivity : FlutterActivity() {
         if (data != null) {
             val scheme = data.scheme?.lowercase()
             if (scheme == "sms" || scheme == "smsto" || scheme == "mms" || scheme == "mmsto") {
-                val raw = data.schemeSpecificPart ?: return null
-                // Strip leading "//" and query params, e.g. "//+2519…?body=…"
-                return raw.trimStart('/').split("?").firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+                // "smsto://+2519..." → host contains the number
+                val host = data.host
+                if (!host.isNullOrBlank()) {
+                    return Uri.decode(host).trim().takeIf { it.isNotEmpty() }
+                }
+                // "smsto:+2519..." → schemeSpecificPart contains the number
+                val ssp = data.schemeSpecificPart
+                if (!ssp.isNullOrBlank()) {
+                    // Strip leading "//" and query params, e.g. "//+2519…?body=…"
+                    val clean = ssp.trimStart('/').split("?").first().trim()
+                    if (clean.isNotEmpty()) return Uri.decode(clean)
+                }
+                // Fallback: last path segment
+                val seg = data.lastPathSegment
+                if (!seg.isNullOrBlank()) return Uri.decode(seg).trim()
             }
         }
-        // Some dialers pass the number as a plain string extra
-        return (i.getStringExtra(Intent.EXTRA_TEXT)
-            ?: i.getStringExtra("address")
-            ?: i.getStringExtra("recipient"))?.trim()?.takeIf { it.isNotEmpty() }
+        // Standard extras used by various dialers
+        val extraKeys = listOf(
+            "address", "recipient", Intent.EXTRA_PHONE_NUMBER,
+            Intent.EXTRA_TEXT, "sms_body", "phone_number",
+        )
+        for (key in extraKeys) {
+            val v = i.getStringExtra(key)?.trim()
+            if (!v.isNullOrEmpty()) return v
+        }
+        return null
     }
 
     private fun folderList(): List<Map<String, Any?>> =

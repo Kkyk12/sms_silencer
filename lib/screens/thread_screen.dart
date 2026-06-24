@@ -207,78 +207,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
     }
   }
 
-  /// Show a bottom sheet with saved quick-reply templates.
-  Future<void> _showTemplates() async {
-    final state = context.read<AppState>();
-    if (state.templates.isEmpty) {
-      await _editTemplates();
-      return;
-    }
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (ctx) {
-        return SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 20, 8, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Quick replies',
-                        style: Theme.of(ctx)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _editTemplates();
-                      },
-                      child: const Text('Edit'),
-                    ),
-                  ],
-                ),
-              ),
-              ...state.templates.map(
-                (t) => ListTile(
-                  title: Text(t, maxLines: 2, overflow: TextOverflow.ellipsis),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _input.text = t;
-                    _input.selection = TextSelection.fromPosition(
-                        TextPosition(offset: t.length));
-                  },
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  /// Edit the template list.
-  Future<void> _editTemplates() async {
-    final state = context.read<AppState>();
-    final templates = List<String>.from(state.templates);
-    final result = await showDialog<List<String>>(
-      context: context,
-      builder: (ctx) => _TemplateEditor(templates: templates),
-    );
-    if (result != null && mounted) {
-      await state.saveTemplates(result);
-    }
-  }
-
   /// Schedule the current composer text to be sent at a chosen time.
   Future<void> _scheduleMessage() async {
     final text = _input.text.trim();
@@ -288,22 +216,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
       );
       return;
     }
-    final now = DateTime.now();
-    final date = await showDatePicker(
+    final scheduled = await showModalBottomSheet<DateTime>(
       context: context,
-      initialDate: now.add(const Duration(hours: 1)),
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _SchedulePickerSheet(),
     );
-    if (date == null || !mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
-    );
-    if (time == null || !mounted) return;
-    final scheduled = DateTime(
-        date.year, date.month, date.day, time.hour, time.minute);
-    if (scheduled.isBefore(now)) {
+    if (scheduled == null || !mounted) return;
+    if (scheduled.isBefore(DateTime.now())) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please pick a future time.')),
       );
@@ -484,8 +404,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   _togglePin();
                 case 'block':
                   _toggleBlock();
-                case 'templates':
-                  _editTemplates();
               }
             },
             itemBuilder: (_) => [
@@ -497,9 +415,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
               PopupMenuItem(
                   value: 'block',
                   child: Text(blocked ? 'Unblock number' : 'Block number')),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                  value: 'templates', child: Text('Edit quick replies')),
             ],
           ),
         ],
@@ -588,7 +503,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
             sending: _sending,
             onSend: _send,
             onLongPressSend: _showSendOptions,
-            onTemplate: _showTemplates,
             currentSimLabel: _currentSimLabel,
           ),
         ],
@@ -739,7 +653,6 @@ class _Composer extends StatelessWidget {
     required this.sending,
     required this.onSend,
     this.onLongPressSend,
-    this.onTemplate,
     this.currentSimLabel,
   });
 
@@ -747,7 +660,6 @@ class _Composer extends StatelessWidget {
   final bool sending;
   final VoidCallback onSend;
   final VoidCallback? onLongPressSend;
-  final VoidCallback? onTemplate;
   /// Short SIM label shown below the send button (e.g. "SIM1"). Null = hidden.
   final String? currentSimLabel;
 
@@ -757,7 +669,7 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         decoration: BoxDecoration(
           color: scheme.surface,
           border: Border(
@@ -769,14 +681,6 @@ class _Composer extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // Quick reply template button
-            IconButton(
-              icon: Icon(Icons.format_quote_outlined,
-                  color: scheme.onSurfaceVariant),
-              tooltip: 'Quick replies',
-              onPressed: onTemplate,
-              padding: const EdgeInsets.all(10),
-            ),
             Expanded(
               child: Container(
                 constraints: const BoxConstraints(minHeight: 46),
@@ -841,14 +745,14 @@ class _Composer extends StatelessWidget {
                       ),
                 if (currentSimLabel != null && !sending)
                   Padding(
-                    padding: const EdgeInsets.only(top: 3),
+                    padding: const EdgeInsets.only(top: 4),
                     child: Text(
                       currentSimLabel!,
                       style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurfaceVariant,
-                        letterSpacing: 0.2,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.primary,
+                        letterSpacing: 0.3,
                       ),
                     ),
                   ),
@@ -933,99 +837,120 @@ class _ScheduledSection extends StatelessWidget {
   }
 }
 
-// ── Template editor dialog ─────────────────────────────────────────────────────
+// ── Combined date+time schedule picker ────────────────────────────────────────
 
-class _TemplateEditor extends StatefulWidget {
-  const _TemplateEditor({required this.templates});
-
-  final List<String> templates;
+class _SchedulePickerSheet extends StatefulWidget {
+  const _SchedulePickerSheet();
 
   @override
-  State<_TemplateEditor> createState() => _TemplateEditorState();
+  State<_SchedulePickerSheet> createState() => _SchedulePickerSheetState();
 }
 
-class _TemplateEditorState extends State<_TemplateEditor> {
-  late final List<String> _items;
-  final _ctrl = TextEditingController();
+class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
+  late DateTime _selectedDate;
+  late TimeOfDay _selectedTime;
 
   @override
   void initState() {
     super.initState();
-    _items = List.from(widget.templates);
+    final now = DateTime.now().add(const Duration(hours: 1));
+    _selectedDate = DateTime(now.year, now.month, now.day);
+    _selectedTime = TimeOfDay(hour: now.hour, minute: 0);
   }
 
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+  DateTime get _combined => DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+        _selectedTime.hour,
+        _selectedTime.minute,
+      );
 
-  void _add() {
-    final text = _ctrl.text.trim();
-    if (text.isEmpty) return;
-    setState(() => _items.add(text));
-    _ctrl.clear();
+  Future<void> _pickTime() async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (t != null) setState(() => _selectedTime = t);
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Quick replies'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_items.isNotEmpty)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _items.length,
-                  itemBuilder: (_, i) => ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(_items[i],
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      onPressed: () =>
-                          setState(() => _items.removeAt(i)),
-                    ),
-                  ),
-                ),
-              ),
-            const SizedBox(height: 8),
-            Row(
+    final scheme = Theme.of(context).colorScheme;
+    final now = DateTime.now();
+    final isFuture = _combined.isAfter(now);
+
+    return Padding(
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Text(
+              'Schedule message',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          // Inline calendar
+          CalendarDatePicker(
+            initialDate: _selectedDate,
+            firstDate: DateTime(now.year, now.month, now.day),
+            lastDate: now.add(const Duration(days: 365)),
+            onDateChanged: (d) => setState(() => _selectedDate = d),
+          ),
+          // Time row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Row(
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ctrl,
-                    decoration: const InputDecoration(
-                      hintText: 'Add a quick reply…',
-                    ),
-                    onSubmitted: (_) => _add(),
+                Icon(Icons.access_time_rounded,
+                    size: 18, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Text(
+                  _selectedTime.format(context),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _pickTime,
+                  child: const Text('Change'),
+                ),
+                const Spacer(),
+                if (!isFuture)
+                  Text(
+                    'Pick a future time',
+                    style: TextStyle(
+                        fontSize: 12, color: scheme.error),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: _add,
-                ),
               ],
             ),
-          ],
-        ),
+          ),
+          // Confirm button
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: isFuture
+                    ? () => Navigator.pop(context, _combined)
+                    : null,
+                icon: const Icon(Icons.schedule_rounded),
+                label: Text(
+                  isFuture
+                      ? 'Schedule for ${DateFormat('MMM d, h:mm a').format(_combined)}'
+                      : 'Schedule',
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _items),
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
 }

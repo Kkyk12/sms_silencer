@@ -281,6 +281,11 @@ class AppState extends ChangeNotifier {
     await loadConversations();
   }
 
+  Future<void> markRead(String address) async {
+    await NativeBridge.markRead(address);
+    await loadConversations();
+  }
+
   /// Delete one or more whole conversations from the device.
   Future<void> deleteConversations(Iterable<String> addresses) async {
     for (final a in addresses) {
