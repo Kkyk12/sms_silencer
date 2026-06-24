@@ -923,58 +923,84 @@ class _ScheduledSection extends StatelessWidget {
   }
 }
 
-// ── Combined date+time schedule picker ────────────────────────────────────────
+// ── Drum-wheel schedule picker ────────────────────────────────────────────────
 
 class _SchedulePickerSheet extends StatefulWidget {
   const _SchedulePickerSheet();
-
   @override
   State<_SchedulePickerSheet> createState() => _SchedulePickerSheetState();
 }
 
 class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
-  late DateTime _selectedDate;
-  late TimeOfDay _selectedTime;
+  static const _itemH = 54.0;
+  static const _visibleRows = 5; // rows visible at once
+  static const _wheelH = _itemH * _visibleRows;
+
+  late final List<DateTime> _days;
+  late final FixedExtentScrollController _dayCtrl;
+  late final FixedExtentScrollController _hrCtrl;
+  late final FixedExtentScrollController _minCtrl;
+
+  int _dayIdx = 0;
+  int _hr = 0;
+  int _min = 0;
 
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now().add(const Duration(hours: 1));
-    _selectedDate = DateTime(now.year, now.month, now.day);
-    _selectedTime = TimeOfDay(hour: now.hour, minute: 0);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    _days = List.generate(365, (i) => today.add(Duration(days: i)));
+    // Default: now + 1 hour
+    final init = now.add(const Duration(hours: 1));
+    _dayIdx = 0;
+    _hr = init.hour;
+    _min = init.minute;
+    _dayCtrl = FixedExtentScrollController(initialItem: _dayIdx);
+    _hrCtrl = FixedExtentScrollController(initialItem: _hr);
+    _minCtrl = FixedExtentScrollController(initialItem: _min);
   }
 
-  DateTime get _combined => DateTime(
-        _selectedDate.year,
-        _selectedDate.month,
-        _selectedDate.day,
-        _selectedTime.hour,
-        _selectedTime.minute,
-      );
+  @override
+  void dispose() {
+    _dayCtrl.dispose();
+    _hrCtrl.dispose();
+    _minCtrl.dispose();
+    super.dispose();
+  }
 
-  Future<void> _pickTime() async {
-    final t = await showTimePicker(
-      context: context,
-      initialTime: _selectedTime,
-    );
-    if (t != null) setState(() => _selectedTime = t);
+  DateTime get _combined {
+    final d = _days[_dayIdx];
+    return DateTime(d.year, d.month, d.day, _hr, _min);
+  }
+
+  String _dayLabel(DateTime d) {
+    if (d == _days[0]) return 'Today';
+    if (_days.length > 1 && d == _days[1]) return 'Tomorrow';
+    return DateFormat('EEE, MMM d').format(d);
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final now = DateTime.now();
-    final isFuture = _combined.isAfter(now);
+    final isFuture = _combined.isAfter(DateTime.now());
 
-    return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Drag handle
+        Container(
+          margin: const EdgeInsets.only(top: 10, bottom: 4),
+          width: 36, height: 4,
+          decoration: BoxDecoration(
+            color: scheme.outlineVariant,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
             child: Text(
               'Schedule message',
               style: Theme.of(context)
@@ -983,59 +1009,182 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
                   ?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
-          // Inline calendar
-          CalendarDatePicker(
-            initialDate: _selectedDate,
-            firstDate: DateTime(now.year, now.month, now.day),
-            lastDate: now.add(const Duration(days: 365)),
-            onDateChanged: (d) => setState(() => _selectedDate = d),
-          ),
-          // Time row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Row(
-              children: [
-                Icon(Icons.access_time_rounded,
-                    size: 18, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 10),
-                Text(
-                  _selectedTime.format(context),
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(width: 8),
-                TextButton(
-                  onPressed: _pickTime,
-                  child: const Text('Change'),
-                ),
-                const Spacer(),
-                if (!isFuture)
-                  Text(
-                    'Pick a future time',
-                    style: TextStyle(
-                        fontSize: 12, color: scheme.error),
+        ),
+
+        // ── Three-column drum picker ─────────────────────────────────────────
+        SizedBox(
+          height: _wheelH,
+          child: Stack(
+            children: [
+              // Drums
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Day (wider)
+                  Expanded(
+                    flex: 54,
+                    child: _Drum(
+                      controller: _dayCtrl,
+                      count: _days.length,
+                      itemExtent: _itemH,
+                      onChanged: (i) => setState(() => _dayIdx = i),
+                      child: (i) => Text(
+                        _dayLabel(_days[i]),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.w400),
+                      ),
+                    ),
                   ),
-              ],
-            ),
-          ),
-          // Confirm button
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: isFuture
-                    ? () => Navigator.pop(context, _combined)
-                    : null,
-                icon: const Icon(Icons.schedule_rounded),
-                label: Text(
-                  isFuture
-                      ? 'Schedule for ${DateFormat('MMM d, h:mm a').format(_combined)}'
-                      : 'Schedule',
+                  // Hour
+                  Expanded(
+                    flex: 23,
+                    child: _Drum(
+                      controller: _hrCtrl,
+                      count: 24,
+                      itemExtent: _itemH,
+                      onChanged: (i) => setState(() => _hr = i),
+                      child: (i) => Text(
+                        '$i'.padLeft(2, '0'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.w400),
+                      ),
+                    ),
+                  ),
+                  // Minute
+                  Expanded(
+                    flex: 23,
+                    child: _Drum(
+                      controller: _minCtrl,
+                      count: 60,
+                      itemExtent: _itemH,
+                      onChanged: (i) => setState(() => _min = i),
+                      child: (i) => Text(
+                        '$i'.padLeft(2, '0'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.w400),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // Top fade
+              IgnorePointer(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    height: _itemH * 2,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          scheme.surface,
+                          scheme.surface.withValues(alpha: 0),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
+              ),
+              // Bottom fade
+              IgnorePointer(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    height: _itemH * 2,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          scheme.surface,
+                          scheme.surface.withValues(alpha: 0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // Selection band (two accent lines around center row)
+              IgnorePointer(
+                child: Center(
+                  child: Container(
+                    height: _itemH,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: scheme.primary, width: 1.5),
+                        bottom: BorderSide(color: scheme.primary, width: 1.5),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Confirm button
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(32)),
+              ),
+              onPressed: isFuture ? () => Navigator.pop(context, _combined) : null,
+              child: Text(
+                isFuture
+                    ? 'Schedule for ${DateFormat('MMM d').format(_combined)}'
+                      ' at ${DateFormat('HH:mm').format(_combined)}'
+                    : 'Pick a future time',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),
           ),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+// Single scrollable drum column used inside _SchedulePickerSheet.
+class _Drum extends StatelessWidget {
+  const _Drum({
+    required this.controller,
+    required this.count,
+    required this.itemExtent,
+    required this.onChanged,
+    required this.child,
+  });
+
+  final FixedExtentScrollController controller;
+  final int count;
+  final double itemExtent;
+  final ValueChanged<int> onChanged;
+  final Widget Function(int) child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListWheelScrollView.useDelegate(
+      controller: controller,
+      itemExtent: itemExtent,
+      diameterRatio: 8,
+      perspective: 0.001,
+      physics: const FixedExtentScrollPhysics(),
+      overAndUnderCenterOpacity: 0.35,
+      onSelectedItemChanged: onChanged,
+      childDelegate: ListWheelChildBuilderDelegate(
+        childCount: count,
+        builder: (_, i) => Center(child: child(i)),
       ),
     );
   }
