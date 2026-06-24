@@ -24,6 +24,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
   List<ThreadMessage> _messages = [];
   List<SimInfo> _sims = [];
   List<ScheduledMessage> _scheduled = [];
+  int _defaultSubId = -1;
   bool _loading = true;
   bool _sending = false;
   String? _name;
@@ -46,7 +47,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
 
   Future<void> _loadSims() async {
     final sims = await NativeBridge.getSims();
-    if (mounted) setState(() => _sims = sims);
+    final defaultSubId = await NativeBridge.getDefaultSmsSubId();
+    if (mounted) setState(() { _sims = sims; _defaultSubId = defaultSubId; });
   }
 
   /// SIM tag ("SIM1"/"SIM2") for a message, or null when there's only one SIM
@@ -57,6 +59,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
       if (s.subId == m.subId) return s.shortLabel;
     }
     return null;
+  }
+
+  /// Short label (e.g. "SIM1") for the SIM that will be used when the user
+  /// taps send without choosing a specific one.
+  String? get _currentSimLabel {
+    if (_sims.isEmpty) return null;
+    if (_sims.length == 1) return _sims.first.shortLabel;
+    // Find the default SMS SIM
+    for (final s in _sims) {
+      if (s.subId == _defaultSubId) return s.shortLabel;
+    }
+    return _sims.first.shortLabel;
   }
 
   @override
@@ -575,6 +589,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
             onSend: _send,
             onLongPressSend: _showSendOptions,
             onTemplate: _showTemplates,
+            currentSimLabel: _currentSimLabel,
           ),
         ],
       ),
@@ -725,6 +740,7 @@ class _Composer extends StatelessWidget {
     required this.onSend,
     this.onLongPressSend,
     this.onTemplate,
+    this.currentSimLabel,
   });
 
   final TextEditingController controller;
@@ -732,6 +748,8 @@ class _Composer extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback? onLongPressSend;
   final VoidCallback? onTemplate;
+  /// Short SIM label shown below the send button (e.g. "SIM1"). Null = hidden.
+  final String? currentSimLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -786,38 +804,56 @@ class _Composer extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            sending
-                ? SizedBox(
-                    width: 46,
-                    height: 46,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  )
-                : Material(
-                    color: AppColors.primary,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: onSend,
-                      onLongPress: onLongPressSend,
-                      child: const SizedBox(
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                sending
+                    ? SizedBox(
                         width: 46,
                         height: 46,
-                        child: Center(
-                          child: Icon(
-                            Icons.send_rounded,
-                            color: Colors.white,
-                            size: 20,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : Material(
+                        color: AppColors.primary,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: onSend,
+                          onLongPress: onLongPressSend,
+                          child: const SizedBox(
+                            width: 46,
+                            height: 46,
+                            child: Center(
+                              child: Icon(
+                                Icons.send_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
                           ),
                         ),
                       ),
+                if (currentSimLabel != null && !sending)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      currentSimLabel!,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurfaceVariant,
+                        letterSpacing: 0.2,
+                      ),
                     ),
                   ),
+              ],
+            ),
           ],
         ),
       ),

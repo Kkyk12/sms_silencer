@@ -56,6 +56,19 @@ class MainActivity : FlutterActivity() {
         try { unregisterReceiver(smsArrivedReceiver) } catch (_: Exception) {}
     }
 
+    /**
+     * Called when the app is already running and an external intent (e.g. tapping
+     * the message icon on a contact in the phone dialer) opens it again.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent) // keep getIntent() fresh
+        val addr = addressFromIntent(intent)
+        if (addr != null) {
+            eventSink?.success(hashMapOf("type" to "openThread", "address" to addr))
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -281,9 +294,40 @@ class MainActivity : FlutterActivity() {
                         result.success(if (photoUri.isNullOrBlank()) null else getContactPhotoBytes(photoUri))
                     }
 
+                    // ── Intent / deep-link address ────────────────────────────
+                    "getInitialAddress" -> result.success(addressFromIntent(intent))
+
+                    // ── Default SMS SIM ───────────────────────────────────────
+                    "getDefaultSmsSubId" -> result.success(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1)
+                            SubscriptionManager.getDefaultSmsSubscriptionId()
+                        else -1
+                    )
+
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * Extract a phone number/address from an intent sent by the phone dialer or
+     * another app. Handles sms:/smsto:/mms:/mmsto: URIs and plain EXTRA_TEXT numbers.
+     */
+    private fun addressFromIntent(i: Intent?): String? {
+        if (i == null) return null
+        val data: Uri? = i.data
+        if (data != null) {
+            val scheme = data.scheme?.lowercase()
+            if (scheme == "sms" || scheme == "smsto" || scheme == "mms" || scheme == "mmsto") {
+                val raw = data.schemeSpecificPart ?: return null
+                // Strip leading "//" and query params, e.g. "//+2519…?body=…"
+                return raw.trimStart('/').split("?").firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+            }
+        }
+        // Some dialers pass the number as a plain string extra
+        return (i.getStringExtra(Intent.EXTRA_TEXT)
+            ?: i.getStringExtra("address")
+            ?: i.getStringExtra("recipient"))?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     private fun folderList(): List<Map<String, Any?>> =

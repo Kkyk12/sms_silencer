@@ -228,4 +228,19 @@ class NativeBridge {
         'getContactPhotoBytes', {'photoUri': photoUri});
     return bytes;
   }
+
+  // ── Intent deep-link ──────────────────────────────────────────────────────
+
+  /// Phone number/address from the launching intent, or null if the app was
+  /// opened normally (not via a "Send message" shortcut in the phone dialer).
+  static Future<String?> getInitialAddress() {
+    return _channel.invokeMethod<String>('getInitialAddress');
+  }
+
+  // ── Default SMS SIM ───────────────────────────────────────────────────────
+
+  /// The subscription ID of the default SMS SIM (-1 if unavailable).
+  static Future<int> getDefaultSmsSubId() async {
+    return (await _channel.invokeMethod<int>('getDefaultSmsSubId')) ?? -1;
+  }
 }

@@ -119,6 +119,16 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       if (!mounted) return;
       final st = context.read<AppState>();
       await st.ensureStartupPermissions();
+
+      // If we were launched from "Send message" on a contact, open that thread.
+      final addr = await NativeBridge.getInitialAddress();
+      if (addr != null && addr.isNotEmpty && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ThreadScreen(address: addr)),
+        );
+        return; // skip the default-app prompt when opened from the dialer
+      }
+
       await st.autoPromptDefaultIfNeeded();
     });
     _smsSub = NativeBridge.smsEvents.listen(_onSmsArrived);
@@ -147,9 +157,20 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   void _onSmsArrived(Map<String, dynamic> data) {
+    // onNewIntent from phone dialer sends this to open a specific thread
+    if (data['type'] == 'openThread') {
+      final address = data['address'] as String? ?? '';
+      if (address.isNotEmpty && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ThreadScreen(address: address)),
+        );
+        context.read<AppState>().loadConversations();
+      }
+      return;
+    }
+
     final address = data['sender'] as String? ?? '';
     final body = data['body'] as String? ?? '';
-    // Use cached contact name if we already know this sender
     final state = context.read<AppState>();
     final convo = state.conversations
         .where((c) => c.address == address)
