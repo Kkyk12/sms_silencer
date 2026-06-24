@@ -214,6 +214,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         title: Text(_titles[_index]),
+        leading: _index > 0
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => setState(() => _index = 0),
+              )
+            : null,
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
