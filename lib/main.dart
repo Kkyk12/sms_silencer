@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'app_state.dart';
 import 'app_theme.dart';
+import 'screens/new_message_screen.dart';
 import 'screens/thread_screen.dart';
 import 'tabs/messages_tab.dart';
 import 'tabs/silenced_tab.dart';
@@ -168,6 +169,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openNewMessage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const NewMessageScreen()),
+    );
+    if (mounted) context.read<AppState>().loadConversations();
+  }
+
+  // kept for reference — replaced by _openNewMessage
   Future<void> _showNewMessageDialog() async {
     final controller = TextEditingController();
     final number = await showDialog<String>(
@@ -288,7 +297,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ),
       floatingActionButton: _index == 0
           ? FloatingActionButton(
-              onPressed: _showNewMessageDialog,
+              onPressed: _openNewMessage,
               tooltip: 'New message',
               backgroundColor: scheme.surfaceContainerHighest,
               child: SvgPicture.asset(

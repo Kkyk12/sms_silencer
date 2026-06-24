@@ -27,6 +27,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
   String get _displayName =>
       (_name != null && _name!.trim().isNotEmpty) ? _name!.trim() : widget.address;
 
+  static String _initial(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '#' : t.substring(0, 1).toUpperCase();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -107,11 +112,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$_displayName will be silenced.')),
     );
-  }
-
-  static String _initial(String s) {
-    final t = s.trim();
-    return t.isEmpty ? '#' : t.substring(0, 1).toUpperCase();
   }
 
   static bool _sameDay(DateTime a, DateTime b) =>
@@ -196,7 +196,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.chat_bubble_outline,
-                                  size: 56, color: scheme.outlineVariant),
+                                  size: 56,
+                                  color: scheme.outlineVariant),
                               const SizedBox(height: 12),
                               Text(
                                 'No messages yet',
@@ -208,8 +209,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 'Say hello below',
-                                style:
-                                    TextStyle(color: scheme.onSurfaceVariant),
+                                style: TextStyle(
+                                    color: scheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -221,28 +222,24 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           itemCount: _messages.length,
                           itemBuilder: (_, i) {
                             final m = _messages[i];
-                            final prev = i > 0 ? _messages[i - 1] : null;
-                            final next = i < _messages.length - 1
-                                ? _messages[i + 1]
-                                : null;
+                            final prev =
+                                i > 0 ? _messages[i - 1] : null;
                             final showDate = prev == null ||
                                 !_sameDay(prev.date, m.date);
-                            final groupedWithPrev = !showDate &&
+                            // reduce gap when same sender follows same sender
+                            final grouped = !showDate &&
                                 prev != null &&
                                 prev.outgoing == m.outgoing;
-                            final isLastInGroup = next == null ||
-                                next.outgoing != m.outgoing ||
-                                !_sameDay(next.date, m.date);
                             return Column(
                               children: [
                                 if (showDate)
-                                  _DateSeparator(date: m.date),
+                                  _DateChip(date: m.date),
                                 GestureDetector(
-                                  onLongPress: () => _deleteMessage(m),
+                                  onLongPress: () =>
+                                      _deleteMessage(m),
                                   child: _Bubble(
                                     message: m,
-                                    grouped: groupedWithPrev,
-                                    showTime: isLastInGroup,
+                                    tightTop: grouped,
                                   ),
                                 ),
                               ],
@@ -262,8 +259,10 @@ class _ThreadScreenState extends State<ThreadScreen> {
   }
 }
 
-class _DateSeparator extends StatelessWidget {
-  const _DateSeparator({required this.date});
+// ── Date separator ─────────────────────────────────────────────────────────────
+
+class _DateChip extends StatelessWidget {
+  const _DateChip({required this.date});
 
   final DateTime date;
 
@@ -282,10 +281,11 @@ class _DateSeparator extends StatelessWidget {
       label = DateFormat('EEE, MMM d').format(date);
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(20),
@@ -304,16 +304,14 @@ class _DateSeparator extends StatelessWidget {
   }
 }
 
+// ── Chat bubble ────────────────────────────────────────────────────────────────
+
 class _Bubble extends StatelessWidget {
-  const _Bubble({
-    required this.message,
-    this.grouped = false,
-    this.showTime = true,
-  });
+  const _Bubble({required this.message, this.tightTop = false});
 
   final ThreadMessage message;
-  final bool grouped;
-  final bool showTime;
+  // true when previous message was from the same side — less vertical space
+  final bool tightTop;
 
   @override
   Widget build(BuildContext context) {
@@ -321,13 +319,14 @@ class _Bubble extends StatelessWidget {
     final out = message.outgoing;
 
     return Padding(
-      padding: EdgeInsets.only(top: grouped ? 2 : 10),
+      padding: EdgeInsets.only(top: tightTop ? 3 : 12),
       child: Column(
         crossAxisAlignment:
             out ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.75,
             ),
@@ -338,8 +337,9 @@ class _Bubble extends StatelessWidget {
               borderRadius: BorderRadius.only(
                 topLeft: const Radius.circular(20),
                 topRight: const Radius.circular(20),
-                bottomLeft: Radius.circular(out ? 20 : (grouped ? 20 : 5)),
-                bottomRight: Radius.circular(out ? (grouped ? 20 : 5) : 20),
+                // small "tail" corner on the sender's side
+                bottomLeft: Radius.circular(out ? 20 : 5),
+                bottomRight: Radius.circular(out ? 5 : 20),
               ),
             ),
             child: Text(
@@ -351,21 +351,22 @@ class _Bubble extends StatelessWidget {
               ),
             ),
           ),
-          if (showTime)
-            Padding(
-              padding: EdgeInsets.only(
-                  top: 3, left: out ? 0 : 6, right: out ? 6 : 0),
-              child: Text(
-                DateFormat('h:mm a').format(message.date),
-                style: TextStyle(
-                    fontSize: 11, color: scheme.onSurfaceVariant),
-              ),
+          Padding(
+            padding: EdgeInsets.only(
+                top: 3, left: out ? 0 : 6, right: out ? 6 : 0),
+            child: Text(
+              DateFormat('h:mm a').format(message.date),
+              style: TextStyle(
+                  fontSize: 11, color: scheme.onSurfaceVariant),
             ),
+          ),
         ],
       ),
     );
   }
 }
+
+// ── Composer ───────────────────────────────────────────────────────────────────
 
 class _Composer extends StatelessWidget {
   const _Composer({
@@ -412,7 +413,8 @@ class _Composer extends StatelessWidget {
                   style: const TextStyle(fontSize: 15),
                   decoration: InputDecoration(
                     hintText: 'Message…',
-                    hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+                    hintStyle:
+                        TextStyle(color: scheme.onSurfaceVariant),
                     border: InputBorder.none,
                     filled: false,
                     isCollapsed: true,
@@ -430,7 +432,9 @@ class _Composer extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: scheme.onSurfaceVariant),
+                        strokeWidth: 2,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   )
                 : Material(
@@ -443,8 +447,11 @@ class _Composer extends StatelessWidget {
                         width: 46,
                         height: 46,
                         child: Center(
-                          child: Icon(Icons.send_rounded,
-                              color: Colors.white, size: 20),
+                          child: Icon(
+                            Icons.send_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                         ),
                       ),
                     ),
