@@ -84,4 +84,28 @@ class NativeBridge {
   static Future<void> markRead(String address) {
     return _channel.invokeMethod<void>('markRead', {'address': address});
   }
+
+  /// Saved contact name for a number, or null if not in Contacts.
+  static Future<String?> getContactName(String address) {
+    return _channel.invokeMethod<String>('getContactName', {'address': address});
+  }
+
+  static Future<String> getThemeMode() async {
+    return (await _channel.invokeMethod<String>('getThemeMode')) ?? 'system';
+  }
+
+  static Future<void> setThemeMode(String mode) {
+    return _channel.invokeMethod<void>('setThemeMode', {'mode': mode});
+  }
+
+  static Future<bool> deleteThread(String address) async {
+    return (await _channel
+            .invokeMethod<bool>('deleteThread', {'address': address})) ??
+        false;
+  }
+
+  static Future<bool> deleteMessage(int id) async {
+    return (await _channel.invokeMethod<bool>('deleteMessage', {'id': id})) ??
+        false;
+  }
 }

@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'models.dart';
@@ -17,16 +17,41 @@ class AppState extends ChangeNotifier {
   List<Conversation> conversations = <Conversation>[];
   bool loadingConversations = false;
   bool _askedDefaultThisSession = false;
+  ThemeMode themeMode = ThemeMode.system;
 
   bool get isReady => isDefaultSmsApp && smsGranted;
   int get mutedDefaultsCount => defaults.where((e) => e.silenced).length;
   int get activeSilencedCount => mutedDefaultsCount + custom.length;
 
   Future<void> init() async {
+    await loadThemeMode();
     await refreshStatus();
     await loadSilenceList();
     await loadConversations();
   }
+
+  Future<void> loadThemeMode() async {
+    themeMode = _parseThemeMode(await NativeBridge.getThemeMode());
+    notifyListeners();
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    themeMode = mode;
+    notifyListeners();
+    await NativeBridge.setThemeMode(_themeModeName(mode));
+  }
+
+  static ThemeMode _parseThemeMode(String s) => switch (s) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+
+  static String _themeModeName(ThemeMode m) => switch (m) {
+        ThemeMode.light => 'light',
+        ThemeMode.dark => 'dark',
+        ThemeMode.system => 'system',
+      };
 
   Future<void> refreshOnResume() async {
     await refreshStatus();
@@ -99,6 +124,23 @@ class AppState extends ChangeNotifier {
   Future<void> removeCustom(String address) async {
     await NativeBridge.removeCustom(address);
     await loadSilenceList();
+    await loadConversations();
+  }
+
+  /// Silence one or more senders (adds them to the custom silence list).
+  Future<void> silenceMany(Iterable<String> addresses) async {
+    for (final a in addresses) {
+      await NativeBridge.addCustom(a);
+    }
+    await loadSilenceList();
+    await loadConversations();
+  }
+
+  /// Delete one or more whole conversations from the device.
+  Future<void> deleteConversations(Iterable<String> addresses) async {
+    for (final a in addresses) {
+      await NativeBridge.deleteThread(a);
+    }
     await loadConversations();
   }
 

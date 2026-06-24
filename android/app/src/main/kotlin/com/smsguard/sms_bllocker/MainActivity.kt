@@ -4,6 +4,7 @@ import android.app.role.RoleManager
 import android.content.ContentValues
 import android.content.Intent
 import android.os.Build
+import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SmsManager
 import io.flutter.embedding.android.FlutterActivity
@@ -93,6 +94,28 @@ class MainActivity : FlutterActivity() {
                         val address = call.argument<String>("address")
                         if (!address.isNullOrBlank()) markThreadRead(address)
                         result.success(null)
+                    }
+
+                    "getContactName" -> {
+                        val address = call.argument<String>("address")
+                        result.success(if (address.isNullOrBlank()) null else contactName(address))
+                    }
+
+                    "getThemeMode" -> result.success(Prefs.getThemeMode(this))
+
+                    "setThemeMode" -> {
+                        Prefs.setThemeMode(this, call.argument<String>("mode") ?: "system")
+                        result.success(null)
+                    }
+
+                    "deleteThread" -> {
+                        val address = call.argument<String>("address")
+                        result.success(if (address.isNullOrBlank()) false else deleteThread(address))
+                    }
+
+                    "deleteMessage" -> {
+                        val id = call.argument<Number>("id")?.toLong()
+                        result.success(if (id == null) false else deleteMessage(id))
                     }
 
                     "getMessages" -> result.success(readInbox())
@@ -187,9 +210,41 @@ class MainActivity : FlutterActivity() {
         return if (digits.length >= 7) digits.takeLast(10) else address.trim().lowercase()
     }
 
+    /** Map of normalized phone number -> saved contact name (needs READ_CONTACTS). */
+    private fun loadContactMap(): Map<String, String> {
+        val map = HashMap<String, String>()
+        try {
+            val cursor = contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ),
+                null, null, null,
+            )
+            cursor?.use { c ->
+                val iNum = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                val iName = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                while (c.moveToNext()) {
+                    val num = if (iNum >= 0) c.getString(iNum) else null
+                    val name = if (iName >= 0) c.getString(iName) else null
+                    if (!num.isNullOrBlank() && !name.isNullOrBlank()) {
+                        map.putIfAbsent(convKey(num), name)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return map
+    }
+
+    /** Saved contact name for one address, or null. */
+    private fun contactName(address: String): String? = loadContactMap()[convKey(address)]
+
     /** One entry per conversation (latest first), with snippet + unread count. */
     private fun conversations(): List<Map<String, Any?>> {
         val order = LinkedHashMap<String, HashMap<String, Any?>>()
+        val contacts = loadContactMap()
         val cursor = contentResolver.query(
             Telephony.Sms.CONTENT_URI,
             arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ),
@@ -210,6 +265,7 @@ class MainActivity : FlutterActivity() {
                 if (existing == null) {
                     order[key] = hashMapOf(
                         "address" to addr,
+                        "name" to contacts[key],
                         "body" to (if (iB >= 0) c.getString(iB) else ""),
                         "date" to (if (iD >= 0) c.getLong(iD) else 0L),
                         "count" to 1,
@@ -233,10 +289,11 @@ class MainActivity : FlutterActivity() {
         val out = ArrayList<Map<String, Any?>>()
         val cursor = contentResolver.query(
             Telephony.Sms.CONTENT_URI,
-            arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE),
+            arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE),
             null, null, "${Telephony.Sms.DATE} ASC",
         )
         cursor?.use { c ->
+            val iId = c.getColumnIndex(Telephony.Sms._ID)
             val iA = c.getColumnIndex(Telephony.Sms.ADDRESS)
             val iB = c.getColumnIndex(Telephony.Sms.BODY)
             val iD = c.getColumnIndex(Telephony.Sms.DATE)
@@ -247,6 +304,7 @@ class MainActivity : FlutterActivity() {
                 val type = if (iT >= 0) c.getInt(iT) else 1
                 out.add(
                     hashMapOf(
+                        "id" to (if (iId >= 0) c.getLong(iId) else 0L),
                         "body" to (if (iB >= 0) c.getString(iB) else ""),
                         "date" to (if (iD >= 0) c.getLong(iD) else 0L),
                         "outgoing" to (type == Telephony.Sms.MESSAGE_TYPE_SENT),
@@ -255,6 +313,45 @@ class MainActivity : FlutterActivity() {
             }
         }
         return out
+    }
+
+    /** Delete every message in a conversation. Needs to be the default SMS app. */
+    private fun deleteThread(target: String): Boolean {
+        return try {
+            val key = convKey(target)
+            val ids = ArrayList<Long>()
+            val cursor = contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS),
+                null, null, null,
+            )
+            cursor?.use { c ->
+                val iId = c.getColumnIndex(Telephony.Sms._ID)
+                val iA = c.getColumnIndex(Telephony.Sms.ADDRESS)
+                while (c.moveToNext()) {
+                    val addr = if (iA >= 0) c.getString(iA) else null
+                    if (addr != null && convKey(addr) == key) ids.add(c.getLong(iId))
+                }
+            }
+            for (id in ids) {
+                contentResolver.delete(
+                    Telephony.Sms.CONTENT_URI, "${Telephony.Sms._ID}=?", arrayOf(id.toString()),
+                )
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun deleteMessage(id: Long): Boolean {
+        return try {
+            contentResolver.delete(
+                Telephony.Sms.CONTENT_URI, "${Telephony.Sms._ID}=?", arrayOf(id.toString()),
+            ) > 0
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun markThreadRead(target: String) {

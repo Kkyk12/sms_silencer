@@ -53,6 +53,9 @@ class SilenceList {
 /// One conversation thread (grouped by sender), for the inbox list.
 class Conversation {
   final String address;
+
+  /// Saved contact name, if the number is in Contacts (else null).
+  final String? name;
   final String lastBody;
   final DateTime date;
   final int count;
@@ -61,6 +64,7 @@ class Conversation {
 
   Conversation({
     required this.address,
+    required this.name,
     required this.lastBody,
     required this.date,
     required this.count,
@@ -68,10 +72,15 @@ class Conversation {
     required this.silenced,
   });
 
+  /// What to show as the title: contact name when known, otherwise the number.
+  String get displayName =>
+      (name != null && name!.trim().isNotEmpty) ? name!.trim() : address;
+
   factory Conversation.fromMap(Map<String, dynamic> m) {
     final addr = (m['address'] as String?)?.trim();
     return Conversation(
       address: (addr != null && addr.isNotEmpty) ? addr : 'Unknown',
+      name: (m['name'] as String?),
       lastBody: (m['body'] as String?) ?? '',
       date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num?)?.toInt() ?? 0),
       count: (m['count'] as num?)?.toInt() ?? 0,
@@ -83,13 +92,20 @@ class Conversation {
 
 /// A single message inside a thread (sent or received).
 class ThreadMessage {
+  final int id;
   final String body;
   final DateTime date;
   final bool outgoing;
 
-  ThreadMessage({required this.body, required this.date, required this.outgoing});
+  ThreadMessage({
+    required this.id,
+    required this.body,
+    required this.date,
+    required this.outgoing,
+  });
 
   factory ThreadMessage.fromMap(Map<String, dynamic> m) => ThreadMessage(
+        id: (m['id'] as num?)?.toInt() ?? 0,
         body: (m['body'] as String?) ?? '',
         date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num?)?.toInt() ?? 0),
         outgoing: (m['outgoing'] as bool?) ?? false,

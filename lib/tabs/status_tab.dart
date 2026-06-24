@@ -152,6 +152,21 @@ class StatusTab extends StatelessWidget {
         ],
         const SizedBox(height: 24),
 
+        Text('Appearance', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        SegmentedButton<ThemeMode>(
+          segments: const [
+            ButtonSegment(value: ThemeMode.system, label: Text('System')),
+            ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+            ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+          ],
+          selected: {state.themeMode},
+          showSelectedIcon: false,
+          onSelectionChanged: (s) =>
+              context.read<AppState>().setThemeMode(s.first),
+        ),
+        const SizedBox(height: 24),
+
         Text('How it works', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         const _Step(

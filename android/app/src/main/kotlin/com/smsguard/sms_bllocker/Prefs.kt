@@ -37,6 +37,14 @@ object Prefs {
         prefs(context).edit().putStringSet(key, value).apply()
     }
 
+    // ---- Theme mode ("system" | "light" | "dark") ----
+    fun getThemeMode(context: Context): String =
+        prefs(context).getString("theme_mode", "system") ?: "system"
+
+    fun setThemeMode(context: Context, mode: String) {
+        prefs(context).edit().putString("theme_mode", mode).apply()
+    }
+
     // ---- Default toggles ----------------------------------------------------
 
     /** Is this built-in default currently silenced? (true unless user turned it off) */

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 
 import 'app_state.dart';
+import 'app_theme.dart';
 import 'screens/thread_screen.dart';
 import 'tabs/messages_tab.dart';
 import 'tabs/silenced_tab.dart';
@@ -11,7 +13,7 @@ void main() {
   runApp(const SmsGuardApp());
 }
 
-const Color _seed = Color(0xFF146C60);
+const Color _seed = AppColors.primary;
 
 class SmsGuardApp extends StatelessWidget {
   const SmsGuardApp({super.key});
@@ -20,42 +22,68 @@ class SmsGuardApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<AppState>(
       create: (_) => AppState()..init(),
-      child: MaterialApp(
-        title: 'SMS Guard',
-        debugShowCheckedModeBanner: false,
-        themeMode: ThemeMode.system,
-        theme: _buildTheme(Brightness.light),
-        darkTheme: _buildTheme(Brightness.dark),
-        home: const HomeShell(),
+      child: Consumer<AppState>(
+        builder: (context, state, _) => MaterialApp(
+          title: 'SMS Guard',
+          debugShowCheckedModeBanner: false,
+          themeMode: state.themeMode,
+          theme: _buildTheme(Brightness.light),
+          darkTheme: _buildTheme(Brightness.dark),
+          home: const HomeShell(),
+        ),
       ),
     );
   }
 
   ThemeData _buildTheme(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(seedColor: _seed, brightness: brightness);
+    final scheme = ColorScheme.fromSeed(
+      seedColor: _seed,
+      brightness: brightness,
+    ).copyWith(primary: AppColors.primary);
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      fontFamily: 'Poppins',
       scaffoldBackgroundColor: scheme.surface,
       appBarTheme: AppBarTheme(
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 2,
+        scrolledUnderElevation: 0,
         centerTitle: false,
+        foregroundColor: scheme.onSurface,
         titleTextStyle: TextStyle(
+          fontFamily: 'Poppins',
           color: scheme.onSurface,
-          fontSize: 22,
+          fontSize: 26,
           fontWeight: FontWeight.w700,
         ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: scheme.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        indicatorColor: AppColors.primary.withValues(alpha: 0.14),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+      ),
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: scheme.surfaceContainerHighest,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(24),
           borderSide: BorderSide.none,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      ),
+      // iOS-style swipe-from-left-edge to go back, on Android too.
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
       ),
     );
   }
@@ -177,9 +205,18 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
+  Widget _navIcon(String asset, Color color) => SvgPicture.asset(
+        'assets/icons/$asset',
+        width: 26,
+        height: 26,
+        colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+      );
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final scheme = Theme.of(context).colorScheme;
+    final inactive = scheme.onSurfaceVariant;
 
     return Scaffold(
       appBar: AppBar(title: Text(_titles[_index])),
@@ -198,7 +235,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ? FloatingActionButton(
               onPressed: _showNewMessageDialog,
               tooltip: 'New message',
-              child: const Icon(Icons.edit_outlined),
+              child: SvgPicture.asset(
+                'assets/icons/pencil-simple.svg',
+                width: 24,
+                height: 24,
+                colorFilter:
+                    const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+              ),
             )
           : _index == 1
               ? FloatingActionButton.small(
@@ -210,20 +253,20 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.message_outlined),
-            selectedIcon: Icon(Icons.message),
+            icon: _navIcon('chat-teardrop-text.svg', inactive),
+            selectedIcon: _navIcon('chat-teardrop-text.svg', AppColors.primary),
             label: 'Messages',
           ),
           NavigationDestination(
-            icon: Icon(Icons.notifications_off_outlined),
-            selectedIcon: Icon(Icons.notifications_off),
+            icon: _navIcon('bell-slash.svg', inactive),
+            selectedIcon: _navIcon('bell-slash.svg', AppColors.primary),
             label: 'Silenced',
           ),
           NavigationDestination(
-            icon: Icon(Icons.shield_outlined),
-            selectedIcon: Icon(Icons.shield),
+            icon: _navIcon('shield.svg', inactive),
+            selectedIcon: _navIcon('shield.svg', AppColors.primary),
             label: 'Status',
           ),
         ],
