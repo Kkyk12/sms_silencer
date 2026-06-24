@@ -55,4 +55,33 @@ class NativeBridge {
         .map((e) => SmsMessage.fromMap(Map<String, dynamic>.from(e as Map)))
         .toList();
   }
+
+  /// One entry per conversation (sender), newest first.
+  static Future<List<Conversation>> getConversations() async {
+    final raw = await _channel.invokeListMethod<dynamic>('getConversations');
+    if (raw == null) return <Conversation>[];
+    return raw
+        .map((e) => Conversation.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  /// All messages with one address, oldest first.
+  static Future<List<ThreadMessage>> getThread(String address) async {
+    final raw =
+        await _channel.invokeListMethod<dynamic>('getThread', {'address': address});
+    if (raw == null) return <ThreadMessage>[];
+    return raw
+        .map((e) => ThreadMessage.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  static Future<bool> sendSms(String address, String body) async {
+    final ok = await _channel
+        .invokeMethod<bool>('sendSms', {'address': address, 'body': body});
+    return ok ?? false;
+  }
+
+  static Future<void> markRead(String address) {
+    return _channel.invokeMethod<void>('markRead', {'address': address});
+  }
 }

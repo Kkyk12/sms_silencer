@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app_state.dart';
+import 'screens/thread_screen.dart';
 import 'tabs/messages_tab.dart';
 import 'tabs/silenced_tab.dart';
 import 'tabs/status_tab.dart';
@@ -75,6 +76,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Once the UI is up, proactively ask to be the default SMS app.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      if (mounted) {
+        await context.read<AppState>().autoPromptDefaultIfNeeded();
+      }
+    });
   }
 
   @override
@@ -131,6 +139,44 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _showNewMessageDialog() async {
+    final controller = TextEditingController();
+    final number = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New message'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.phone,
+          decoration: const InputDecoration(
+            labelText: 'Recipient',
+            hintText: 'e.g. +251912345678',
+          ),
+          onSubmitted: (v) => Navigator.pop(context, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Next'),
+          ),
+        ],
+      ),
+    );
+    if (number != null && number.trim().isNotEmpty && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ThreadScreen(address: number.trim()),
+        ),
+      );
+      if (mounted) context.read<AppState>().loadConversations();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
@@ -148,13 +194,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ),
         ],
       ),
-      floatingActionButton: _index == 1
-          ? FloatingActionButton.small(
-              onPressed: _showAddDialog,
-              tooltip: 'Add sender',
-              child: const Icon(Icons.add),
+      floatingActionButton: _index == 0
+          ? FloatingActionButton(
+              onPressed: _showNewMessageDialog,
+              tooltip: 'New message',
+              child: const Icon(Icons.edit_outlined),
             )
-          : null,
+          : _index == 1
+              ? FloatingActionButton.small(
+                  onPressed: _showAddDialog,
+                  tooltip: 'Add sender',
+                  child: const Icon(Icons.add),
+                )
+              : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),

@@ -1,9 +1,11 @@
 package com.smsguard.sms_bllocker
 
 import android.app.role.RoleManager
+import android.content.ContentValues
 import android.content.Intent
 import android.os.Build
 import android.provider.Telephony
+import android.telephony.SmsManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -64,6 +66,33 @@ class MainActivity : FlutterActivity() {
                             Prefs.removeCustomSilenced(this, address)
                             result.success(null)
                         }
+                    }
+
+                    "getConversations" -> result.success(conversations())
+
+                    "getThread" -> {
+                        val address = call.argument<String>("address")
+                        if (address.isNullOrBlank()) {
+                            result.error("ARG", "address required", null)
+                        } else {
+                            result.success(thread(address))
+                        }
+                    }
+
+                    "sendSms" -> {
+                        val address = call.argument<String>("address")
+                        val body = call.argument<String>("body")
+                        if (address.isNullOrBlank() || body == null) {
+                            result.error("ARG", "address and body required", null)
+                        } else {
+                            result.success(sendSms(address, body))
+                        }
+                    }
+
+                    "markRead" -> {
+                        val address = call.argument<String>("address")
+                        if (!address.isNullOrBlank()) markThreadRead(address)
+                        result.success(null)
                     }
 
                     "getMessages" -> result.success(readInbox())
@@ -148,5 +177,145 @@ class MainActivity : FlutterActivity() {
             }
         }
         return out
+    }
+
+    // ---- conversations / thread / send -------------------------------------
+
+    /** Group key so different formats of the same number/sender collapse together. */
+    private fun convKey(address: String): String {
+        val digits = address.filter { it.isDigit() }
+        return if (digits.length >= 7) digits.takeLast(10) else address.trim().lowercase()
+    }
+
+    /** One entry per conversation (latest first), with snippet + unread count. */
+    private fun conversations(): List<Map<String, Any?>> {
+        val order = LinkedHashMap<String, HashMap<String, Any?>>()
+        val cursor = contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ),
+            null, null, "${Telephony.Sms.DATE} DESC",
+        )
+        cursor?.use { c ->
+            val iA = c.getColumnIndex(Telephony.Sms.ADDRESS)
+            val iB = c.getColumnIndex(Telephony.Sms.BODY)
+            val iD = c.getColumnIndex(Telephony.Sms.DATE)
+            val iT = c.getColumnIndex(Telephony.Sms.TYPE)
+            val iR = c.getColumnIndex(Telephony.Sms.READ)
+            while (c.moveToNext()) {
+                val addr = (if (iA >= 0) c.getString(iA) else null) ?: continue
+                val key = convKey(addr)
+                val type = if (iT >= 0) c.getInt(iT) else 1
+                val read = if (iR >= 0) c.getInt(iR) else 1
+                val existing = order[key]
+                if (existing == null) {
+                    order[key] = hashMapOf(
+                        "address" to addr,
+                        "body" to (if (iB >= 0) c.getString(iB) else ""),
+                        "date" to (if (iD >= 0) c.getLong(iD) else 0L),
+                        "count" to 1,
+                        "unread" to (if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && read == 0) 1 else 0),
+                        "silenced" to Prefs.isSilenced(this, addr),
+                    )
+                } else {
+                    existing["count"] = (existing["count"] as Int) + 1
+                    if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && read == 0) {
+                        existing["unread"] = (existing["unread"] as Int) + 1
+                    }
+                }
+            }
+        }
+        return order.values.toList()
+    }
+
+    /** All messages with a given address, oldest first (for the chat view). */
+    private fun thread(target: String): List<Map<String, Any?>> {
+        val key = convKey(target)
+        val out = ArrayList<Map<String, Any?>>()
+        val cursor = contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE),
+            null, null, "${Telephony.Sms.DATE} ASC",
+        )
+        cursor?.use { c ->
+            val iA = c.getColumnIndex(Telephony.Sms.ADDRESS)
+            val iB = c.getColumnIndex(Telephony.Sms.BODY)
+            val iD = c.getColumnIndex(Telephony.Sms.DATE)
+            val iT = c.getColumnIndex(Telephony.Sms.TYPE)
+            while (c.moveToNext()) {
+                val addr = (if (iA >= 0) c.getString(iA) else null) ?: continue
+                if (convKey(addr) != key) continue
+                val type = if (iT >= 0) c.getInt(iT) else 1
+                out.add(
+                    hashMapOf(
+                        "body" to (if (iB >= 0) c.getString(iB) else ""),
+                        "date" to (if (iD >= 0) c.getLong(iD) else 0L),
+                        "outgoing" to (type == Telephony.Sms.MESSAGE_TYPE_SENT),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    private fun markThreadRead(target: String) {
+        try {
+            val key = convKey(target)
+            val cursor = contentResolver.query(
+                Telephony.Sms.Inbox.CONTENT_URI,
+                arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS),
+                "${Telephony.Sms.READ}=0", null, null,
+            )
+            cursor?.use { c ->
+                val iId = c.getColumnIndex(Telephony.Sms._ID)
+                val iA = c.getColumnIndex(Telephony.Sms.ADDRESS)
+                while (c.moveToNext()) {
+                    val addr = if (iA >= 0) c.getString(iA) else null
+                    if (addr != null && convKey(addr) == key) {
+                        val values = ContentValues().apply {
+                            put(Telephony.Sms.READ, 1)
+                            put(Telephony.Sms.SEEN, 1)
+                        }
+                        contentResolver.update(
+                            Telephony.Sms.CONTENT_URI, values,
+                            "${Telephony.Sms._ID}=?", arrayOf(c.getLong(iId).toString()),
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Send an SMS and store it in the Sent box (default-app responsibility). */
+    private fun sendSms(address: String, body: String): Boolean {
+        return try {
+            val sms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                getSystemService(SmsManager::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                SmsManager.getDefault()
+            }
+            val parts = sms.divideMessage(body)
+            if (parts.size > 1) {
+                sms.sendMultipartTextMessage(address, null, parts, null, null)
+            } else {
+                sms.sendTextMessage(address, null, body, null, null)
+            }
+            try {
+                val values = ContentValues().apply {
+                    put(Telephony.Sms.ADDRESS, address)
+                    put(Telephony.Sms.BODY, body)
+                    put(Telephony.Sms.DATE, System.currentTimeMillis())
+                    put(Telephony.Sms.READ, 1)
+                    put(Telephony.Sms.SEEN, 1)
+                    put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+                }
+                contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+            } catch (_: Exception) {
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

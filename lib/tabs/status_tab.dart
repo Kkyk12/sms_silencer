@@ -99,6 +99,57 @@ class StatusTab extends StatelessWidget {
             ],
           ),
         ),
+
+        if (!state.isDefaultSmsApp) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.info_outline,
+                        size: 18, color: scheme.onSurfaceVariant),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Phone won't let you set it as default?",
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Some phones (e.g. Samsung) block apps installed outside the '
+                  'Play Store from becoming the default SMS app. To allow it:\n'
+                  '1. Open app settings below\n'
+                  '2. Tap ⋮ (top-right) → "Allow restricted settings"\n'
+                  '3. Come back and tap "Set" again',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      context.read<AppState>().openSystemAppSettings(),
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: const Text('Open app settings'),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
 
         Text('How it works', style: Theme.of(context).textTheme.titleMedium),

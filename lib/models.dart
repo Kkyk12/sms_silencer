@@ -49,3 +49,49 @@ class SilenceList {
 
   const SilenceList({required this.defaults, required this.custom});
 }
+
+/// One conversation thread (grouped by sender), for the inbox list.
+class Conversation {
+  final String address;
+  final String lastBody;
+  final DateTime date;
+  final int count;
+  final int unread;
+  final bool silenced;
+
+  Conversation({
+    required this.address,
+    required this.lastBody,
+    required this.date,
+    required this.count,
+    required this.unread,
+    required this.silenced,
+  });
+
+  factory Conversation.fromMap(Map<String, dynamic> m) {
+    final addr = (m['address'] as String?)?.trim();
+    return Conversation(
+      address: (addr != null && addr.isNotEmpty) ? addr : 'Unknown',
+      lastBody: (m['body'] as String?) ?? '',
+      date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num?)?.toInt() ?? 0),
+      count: (m['count'] as num?)?.toInt() ?? 0,
+      unread: (m['unread'] as num?)?.toInt() ?? 0,
+      silenced: (m['silenced'] as bool?) ?? false,
+    );
+  }
+}
+
+/// A single message inside a thread (sent or received).
+class ThreadMessage {
+  final String body;
+  final DateTime date;
+  final bool outgoing;
+
+  ThreadMessage({required this.body, required this.date, required this.outgoing});
+
+  factory ThreadMessage.fromMap(Map<String, dynamic> m) => ThreadMessage(
+        body: (m['body'] as String?) ?? '',
+        date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num?)?.toInt() ?? 0),
+        outgoing: (m['outgoing'] as bool?) ?? false,
+      );
+}

@@ -4,8 +4,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 
-/// App-wide state: default-app status, runtime permissions, the silence list
-/// (built-in defaults + user-added), and the received-message list.
+/// App-wide state: default-app status, runtime permissions, the silence list,
+/// and the conversation list.
 class AppState extends ChangeNotifier {
   bool isDefaultSmsApp = false;
   bool smsGranted = false;
@@ -14,26 +14,23 @@ class AppState extends ChangeNotifier {
 
   List<SilenceEntry> defaults = <SilenceEntry>[];
   List<String> custom = <String>[];
-  List<SmsMessage> messages = <SmsMessage>[];
-  bool loadingMessages = false;
+  List<Conversation> conversations = <Conversation>[];
+  bool loadingConversations = false;
+  bool _askedDefaultThisSession = false;
 
-  /// True once everything needed for filtering is in place.
   bool get isReady => isDefaultSmsApp && smsGranted;
-
   int get mutedDefaultsCount => defaults.where((e) => e.silenced).length;
   int get activeSilencedCount => mutedDefaultsCount + custom.length;
 
   Future<void> init() async {
     await refreshStatus();
     await loadSilenceList();
-    await loadMessages();
+    await loadConversations();
   }
 
-  /// Cheap refresh when returning to the foreground (after the system role/
-  /// permission dialogs, which happen outside the app).
   Future<void> refreshOnResume() async {
     await refreshStatus();
-    await loadMessages();
+    await loadConversations();
   }
 
   Future<void> refreshStatus() async {
@@ -51,12 +48,27 @@ class AppState extends ChangeNotifier {
       Permission.contacts,
     ].request();
     await refreshStatus();
-    await loadMessages();
+    await loadConversations();
   }
 
   Future<void> requestDefaultApp() async {
     await NativeBridge.requestDefaultSmsApp();
-    // Real status update happens in refreshOnResume() when we come back.
+  }
+
+  /// Proactively ask to become the default SMS app on launch — once per
+  /// session, only if not already default.
+  Future<void> autoPromptDefaultIfNeeded() async {
+    if (_askedDefaultThisSession) return;
+    await refreshStatus();
+    if (!isDefaultSmsApp) {
+      _askedDefaultThisSession = true;
+      await requestDefaultApp();
+    }
+  }
+
+  /// Open this app's system settings page (to "Allow restricted settings").
+  Future<void> openSystemAppSettings() async {
+    await openAppSettings();
   }
 
   Future<void> loadSilenceList() async {
@@ -73,7 +85,7 @@ class AppState extends ChangeNotifier {
         if (e.address == address) e.copyWith(silenced: silenced) else e,
     ];
     notifyListeners();
-    await loadMessages(); // re-evaluate the silenced/rings badges
+    await loadConversations();
   }
 
   Future<void> addCustom(String address) async {
@@ -81,29 +93,29 @@ class AppState extends ChangeNotifier {
     if (trimmed.isEmpty) return;
     await NativeBridge.addCustom(trimmed);
     await loadSilenceList();
-    await loadMessages();
+    await loadConversations();
   }
 
   Future<void> removeCustom(String address) async {
     await NativeBridge.removeCustom(address);
     await loadSilenceList();
-    await loadMessages();
+    await loadConversations();
   }
 
-  Future<void> loadMessages() async {
+  Future<void> loadConversations() async {
     if (!smsGranted) {
-      messages = <SmsMessage>[];
+      conversations = <Conversation>[];
       notifyListeners();
       return;
     }
-    loadingMessages = true;
+    loadingConversations = true;
     notifyListeners();
     try {
-      messages = await NativeBridge.getMessages();
+      conversations = await NativeBridge.getConversations();
     } catch (_) {
-      messages = <SmsMessage>[];
+      conversations = <Conversation>[];
     }
-    loadingMessages = false;
+    loadingConversations = false;
     notifyListeners();
   }
 }
