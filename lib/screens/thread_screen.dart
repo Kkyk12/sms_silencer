@@ -24,11 +24,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
   List<ThreadMessage> _messages = [];
   List<SimInfo> _sims = [];
   List<ScheduledMessage> _scheduled = [];
+  final Set<int> _selectedIds = {};
   int _defaultSubId = -1;
   bool _loading = true;
   bool _sending = false;
   String? _name;
   Uint8List? _contactPhoto;
+
+  bool get _selecting => _selectedIds.isNotEmpty;
 
   String get _displayName =>
       (_name != null && _name!.trim().isNotEmpty) ? _name!.trim() : widget.address;
@@ -46,9 +49,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
   }
 
   Future<void> _loadSims() async {
-    final sims = await NativeBridge.getSims();
-    final defaultSubId = await NativeBridge.getDefaultSmsSubId();
-    if (mounted) setState(() { _sims = sims; _defaultSubId = defaultSubId; });
+    final results = await Future.wait([
+      NativeBridge.getSims(),
+      NativeBridge.getDefaultSmsSubId(),
+    ]);
+    if (mounted) setState(() {
+      _sims = results[0] as List<SimInfo>;
+      _defaultSubId = results[1] as int;
+    });
   }
 
   /// SIM tag ("SIM1"/"SIM2") for a message, or null when there's only one SIM
@@ -81,19 +89,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
   }
 
   Future<void> _load() async {
-    final msgs = await NativeBridge.getThread(widget.address);
-    final name = await NativeBridge.getContactName(widget.address);
-    final scheduled =
-        await NativeBridge.getScheduledMessages(widget.address);
-    await NativeBridge.markRead(widget.address);
+    final results = await Future.wait([
+      NativeBridge.getThread(widget.address),
+      NativeBridge.getContactName(widget.address),
+      NativeBridge.getScheduledMessages(widget.address),
+      NativeBridge.markRead(widget.address),
+    ]);
     if (!mounted) return;
-    // Load contact photo from cache or fetch
-    final state = context.read<AppState>();
-    Uint8List? photo = state.contactPhotos[widget.address];
+    final photo = context.read<AppState>().contactPhotos[widget.address];
     setState(() {
-      _messages = msgs;
-      _scheduled = scheduled;
-      _name = name;
+      _messages = results[0] as List<ThreadMessage>;
+      _name = results[1] as String?;
+      _scheduled = results[2] as List<ScheduledMessage>;
       _contactPhoto = photo;
       _loading = false;
     });
@@ -147,6 +154,21 @@ class _ThreadScreenState extends State<ThreadScreen> {
       await NativeBridge.deleteMessage(m.id);
       await _load();
     }
+  }
+
+  void _toggleMessageSelect(ThreadMessage m) {
+    setState(() {
+      if (!_selectedIds.remove(m.id)) _selectedIds.add(m.id);
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    final ids = List<int>.from(_selectedIds);
+    setState(() => _selectedIds.clear());
+    for (final id in ids) {
+      await NativeBridge.deleteMessage(id);
+    }
+    await _load();
   }
 
   void _silenceSender() {
@@ -343,88 +365,113 @@ class _ThreadScreenState extends State<ThreadScreen> {
     final blocked = state.isBlocked(widget.address);
 
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 19,
-              backgroundColor: scheme.surfaceContainerHighest,
-              backgroundImage: _contactPhoto != null
-                  ? MemoryImage(_contactPhoto!)
-                  : null,
-              child: _contactPhoto == null
-                  ? Text(
-                      _initial(_displayName),
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _displayName,
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+      appBar: _selecting
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() => _selectedIds.clear()),
+              ),
+              title: Text('${_selectedIds.length} selected'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.select_all),
+                  tooltip: 'Select all',
+                  onPressed: () => setState(
+                    () => _selectedIds.addAll(_messages.map((m) => m.id)),
                   ),
-                  if (_name != null && _name!.trim().isNotEmpty)
-                    Text(
-                      widget.address,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.normal,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete',
+                  onPressed: _deleteSelected,
+                ),
+              ],
+            )
+          : AppBar(
+              titleSpacing: 0,
+              title: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 19,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    backgroundImage: _contactPhoto != null
+                        ? MemoryImage(_contactPhoto!)
+                        : null,
+                    child: _contactPhoto == null
+                        ? Text(
+                            _initial(_displayName),
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _displayName,
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (_name != null && _name!.trim().isNotEmpty)
+                          Text(
+                            widget.address,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: scheme.onSurfaceVariant,
+                              fontWeight: FontWeight.normal,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               ),
+              actions: [
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'silence':
+                        _silenceSender();
+                      case 'pin':
+                        _togglePin();
+                      case 'block':
+                        _toggleBlock();
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                        value: 'silence', child: Text('Silence sender')),
+                    PopupMenuItem(
+                        value: 'pin',
+                        child: Text(pinned
+                            ? 'Unpin conversation'
+                            : 'Pin conversation')),
+                    PopupMenuItem(
+                        value: 'block',
+                        child: Text(
+                            blocked ? 'Unblock number' : 'Block number')),
+                  ],
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (v) {
-              switch (v) {
-                case 'silence':
-                  _silenceSender();
-                case 'pin':
-                  _togglePin();
-                case 'block':
-                  _toggleBlock();
-              }
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                  value: 'silence', child: Text('Silence sender')),
-              PopupMenuItem(
-                  value: 'pin',
-                  child: Text(pinned ? 'Unpin conversation' : 'Pin conversation')),
-              PopupMenuItem(
-                  value: 'block',
-                  child: Text(blocked ? 'Unblock number' : 'Block number')),
-            ],
-          ),
-        ],
-      ),
       body: Column(
         children: [
           Expanded(
             child: GestureDetector(
               onHorizontalDragEnd: (d) {
-                if ((d.primaryVelocity ?? 0) > 250) {
+                if ((d.primaryVelocity ?? 0) > 250 && !_selecting) {
                   Navigator.of(context).maybePop();
                 }
               },
@@ -436,8 +483,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.chat_bubble_outline,
-                                  size: 56,
-                                  color: scheme.outlineVariant),
+                                  size: 56, color: scheme.outlineVariant),
                               const SizedBox(height: 12),
                               Text(
                                 'No messages yet',
@@ -447,11 +493,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                'Say hello below',
-                                style: TextStyle(
-                                    color: scheme.onSurfaceVariant),
-                              ),
+                              Text('Say hello below',
+                                  style: TextStyle(
+                                      color: scheme.onSurfaceVariant)),
                             ],
                           ),
                         )
@@ -462,30 +506,37 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           itemCount: _messages.length,
                           itemBuilder: (_, i) {
                             final m = _messages[i];
-                            final prev =
-                                i > 0 ? _messages[i - 1] : null;
+                            final prev = i > 0 ? _messages[i - 1] : null;
                             final showDate = prev == null ||
                                 !_sameDay(prev.date, m.date);
-                            // reduce gap when same sender follows same sender
                             final grouped = !showDate &&
                                 prev != null &&
                                 prev.outgoing == m.outgoing;
+                            final selected = _selectedIds.contains(m.id);
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                if (showDate)
-                                  _DateChip(date: m.date),
-                                Align(
-                                  alignment: m.outgoing
-                                      ? Alignment.centerRight
-                                      : Alignment.centerLeft,
-                                  child: GestureDetector(
-                                    onLongPress: () =>
-                                        _deleteMessage(m),
-                                    child: _Bubble(
-                                      message: m,
-                                      tightTop: grouped,
-                                      simTag: _simTag(m),
+                                if (showDate) _DateChip(date: m.date),
+                                GestureDetector(
+                                  onLongPress: () => _toggleMessageSelect(m),
+                                  onTap: _selecting
+                                      ? () => _toggleMessageSelect(m)
+                                      : null,
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 150),
+                                    color: selected
+                                        ? scheme.primary.withValues(alpha: 0.12)
+                                        : Colors.transparent,
+                                    child: Align(
+                                      alignment: m.outgoing
+                                          ? Alignment.centerRight
+                                          : Alignment.centerLeft,
+                                      child: _Bubble(
+                                        message: m,
+                                        tightTop: grouped,
+                                        simTag: _simTag(m),
+                                        selected: selected,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -559,13 +610,17 @@ class _DateChip extends StatelessWidget {
 // ── Chat bubble ────────────────────────────────────────────────────────────────
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, this.tightTop = false, this.simTag});
+  const _Bubble({
+    required this.message,
+    this.tightTop = false,
+    this.simTag,
+    this.selected = false,
+  });
 
   final ThreadMessage message;
-  // true when previous message was from the same side — less vertical space
   final bool tightTop;
-  // "SIM1"/"SIM2" shown beside the time; null to hide.
   final String? simTag;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -678,39 +733,39 @@ class _Composer extends StatelessWidget {
             ),
           ),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Container(
-                constraints: const BoxConstraints(minHeight: 46),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: TextField(
-                  controller: controller,
-                  minLines: 1,
-                  maxLines: 6,
-                  textCapitalization: TextCapitalization.sentences,
-                  style: const TextStyle(fontSize: 15),
-                  decoration: InputDecoration(
-                    hintText: 'Message…',
-                    hintStyle: TextStyle(color: scheme.onSurfaceVariant),
-                    border: InputBorder.none,
-                    filled: false,
-                    isCollapsed: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 46),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                    child: TextField(
+                      controller: controller,
+                      minLines: 1,
+                      maxLines: 6,
+                      textCapitalization: TextCapitalization.sentences,
+                      style: const TextStyle(fontSize: 15),
+                      decoration: InputDecoration(
+                        hintText: 'Message…',
+                        hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+                        border: InputBorder.none,
+                        filled: false,
+                        isCollapsed: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+                const SizedBox(width: 8),
                 sending
                     ? SizedBox(
                         width: 46,
@@ -743,11 +798,19 @@ class _Composer extends StatelessWidget {
                           ),
                         ),
                       ),
-                if (currentSimLabel != null && !sending)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
+              ],
+            ),
+            // SIM label sits below the Row so it never shifts the send button up
+            if (currentSimLabel != null && !sending)
+              Align(
+                alignment: Alignment.centerRight,
+                child: SizedBox(
+                  width: 46,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 3),
                     child: Text(
                       currentSimLabel!,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -756,8 +819,8 @@ class _Composer extends StatelessWidget {
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+              ),
           ],
         ),
       ),

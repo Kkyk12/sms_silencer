@@ -16,7 +16,10 @@ class MessagesTab extends StatefulWidget {
   State<MessagesTab> createState() => _MessagesTabState();
 }
 
-class _MessagesTabState extends State<MessagesTab> {
+class _MessagesTabState extends State<MessagesTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   final Set<String> _selected = <String>{};
 
   bool get _selecting => _selected.isNotEmpty;
@@ -243,6 +246,7 @@ class _MessagesTabState extends State<MessagesTab> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final state = context.watch<AppState>();
     final scheme = Theme.of(context).colorScheme;
 

@@ -43,14 +43,16 @@ class AppState extends ChangeNotifier {
   int get activeSilencedCount => mutedDefaultsCount + custom.length;
 
   Future<void> init() async {
-    await loadThemeMode();
-    await refreshStatus();
-    await loadSilenceList();
-    await loadConversations();
-    await loadFolders();
-    await loadPinned();
-    await loadBlocked();
-    await loadTemplates();
+    await loadThemeMode(); // must be first — drives theme before first frame
+    await Future.wait([
+      refreshStatus(),
+      loadSilenceList(),
+      loadConversations(),
+      loadFolders(),
+      loadPinned(),
+      loadBlocked(),
+      loadTemplates(),
+    ]);
   }
 
   Future<void> loadThemeMode() async {
