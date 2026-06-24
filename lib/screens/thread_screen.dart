@@ -145,7 +145,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
       body: Column(
         children: [
           Expanded(
-            child: _loading
+            child: GestureDetector(
+              onHorizontalDragEnd: (d) {
+                if ((d.primaryVelocity ?? 0) > 250) {
+                  Navigator.of(context).maybePop();
+                }
+              },
+              child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _messages.isEmpty
                     ? const Center(
@@ -165,6 +171,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           child: _Bubble(message: _messages[i]),
                         ),
                       ),
+            ),
           ),
           _Composer(controller: _input, sending: _sending, onSend: _send),
         ],

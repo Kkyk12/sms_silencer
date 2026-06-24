@@ -108,4 +108,8 @@ class NativeBridge {
     return (await _channel.invokeMethod<bool>('deleteMessage', {'id': id})) ??
         false;
   }
+
+  static Future<void> testNotification() {
+    return _channel.invokeMethod<void>('testNotification');
+  }
 }

@@ -7,8 +7,6 @@ import '../app_theme.dart';
 import '../models.dart';
 import '../screens/thread_screen.dart';
 
-enum _Filter { all, silenced, rings }
-
 class MessagesTab extends StatefulWidget {
   const MessagesTab({super.key});
 
@@ -17,7 +15,6 @@ class MessagesTab extends StatefulWidget {
 }
 
 class _MessagesTabState extends State<MessagesTab> {
-  _Filter _filter = _Filter.all;
   final Set<String> _selected = <String>{};
 
   bool get _selecting => _selected.isNotEmpty;
@@ -84,16 +81,15 @@ class _MessagesTabState extends State<MessagesTab> {
     }
 
     final all = state.conversations;
-    final silencedCount = all.where((c) => c.silenced).length;
-    final list = switch (_filter) {
-      _Filter.all => all,
-      _Filter.silenced => all.where((c) => c.silenced).toList(),
-      _Filter.rings => all.where((c) => !c.silenced).toList(),
+    final list = switch (state.msgFilter) {
+      MsgFilter.all => all,
+      MsgFilter.silenced => all.where((c) => c.silenced).toList(),
+      MsgFilter.rings => all.where((c) => !c.silenced).toList(),
     };
 
     return Column(
       children: [
-        _selecting ? _selectionBar(scheme, list) : _filterChips(all, silencedCount),
+        if (_selecting) _selectionBar(scheme, list),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => context.read<AppState>().loadConversations(),
@@ -132,25 +128,6 @@ class _MessagesTabState extends State<MessagesTab> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _filterChips(List<Conversation> all, int silencedCount) {
-    Widget chip(String label, int count, _Filter f) => ChoiceChip(
-          label: Text('$label · $count'),
-          selected: _filter == f,
-          onSelected: (_) => setState(() => _filter = f),
-        );
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: Wrap(
-        spacing: 8,
-        children: [
-          chip('All', all.length, _Filter.all),
-          chip('Silenced', silencedCount, _Filter.silenced),
-          chip('Rings', all.length - silencedCount, _Filter.rings),
-        ],
-      ),
     );
   }
 
@@ -319,15 +296,15 @@ class _ConversationTile extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 7, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppColors.primary,
+                            color: scheme.onSurfaceVariant.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(7),
                           ),
                           child: Text(
                             '${convo.unread}',
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
                               fontSize: 11,
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),

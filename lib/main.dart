@@ -107,9 +107,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // Once the UI is up, proactively ask to be the default SMS app.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await Future<void>.delayed(const Duration(milliseconds: 800));
-      if (mounted) {
-        await context.read<AppState>().autoPromptDefaultIfNeeded();
-      }
+      if (!mounted) return;
+      final st = context.read<AppState>();
+      await st.ensureStartupPermissions();
+      await st.autoPromptDefaultIfNeeded();
     });
   }
 
@@ -205,21 +206,63 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  Widget _navIcon(String asset, Color color) => SvgPicture.asset(
-        'assets/icons/$asset',
-        width: 26,
-        height: 26,
-        colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
-      );
-
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final scheme = Theme.of(context).colorScheme;
-    final inactive = scheme.onSurfaceVariant;
 
     return Scaffold(
-      appBar: AppBar(title: Text(_titles[_index])),
+      appBar: AppBar(
+        title: Text(_titles[_index]),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              switch (value) {
+                case 'rings':
+                  context.read<AppState>().setMsgFilter(MsgFilter.rings);
+                case 'silenced':
+                  context.read<AppState>().setMsgFilter(MsgFilter.silenced);
+                case 'all':
+                  context.read<AppState>().setMsgFilter(MsgFilter.all);
+                case 'status':
+                  setState(() => _index = 2);
+              }
+            },
+            itemBuilder: (_) {
+              final f = state.msgFilter;
+              return [
+                PopupMenuItem<String>(
+                  value: 'rings',
+                  child: Row(children: [
+                    const Expanded(child: Text('Rings only')),
+                    if (f == MsgFilter.rings) const Icon(Icons.check, size: 18),
+                  ]),
+                ),
+                PopupMenuItem<String>(
+                  value: 'silenced',
+                  child: Row(children: [
+                    const Expanded(child: Text('Silenced')),
+                    if (f == MsgFilter.silenced) const Icon(Icons.check, size: 18),
+                  ]),
+                ),
+                PopupMenuItem<String>(
+                  value: 'all',
+                  child: Row(children: [
+                    const Expanded(child: Text('All messages')),
+                    if (f == MsgFilter.all) const Icon(Icons.check, size: 18),
+                  ]),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem<String>(
+                  value: 'status',
+                  child: Text('Status'),
+                ),
+              ];
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
           if (!state.isDefaultSmsApp) const _DefaultAppBanner(),
@@ -235,41 +278,79 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ? FloatingActionButton(
               onPressed: _showNewMessageDialog,
               tooltip: 'New message',
+              backgroundColor: scheme.surfaceContainerHighest,
               child: SvgPicture.asset(
                 'assets/icons/pencil-simple.svg',
                 width: 24,
                 height: 24,
-                colorFilter:
-                    const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                colorFilter: ColorFilter.mode(
+                    scheme.onSurfaceVariant, BlendMode.srcIn),
               ),
             )
           : _index == 1
               ? FloatingActionButton.small(
                   onPressed: _showAddDialog,
                   tooltip: 'Add sender',
-                  child: const Icon(Icons.add),
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  child: Icon(Icons.add, color: scheme.onSurfaceVariant),
                 )
               : null,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: [
-          NavigationDestination(
-            icon: _navIcon('chat-teardrop-text.svg', inactive),
-            selectedIcon: _navIcon('chat-teardrop-text.svg', AppColors.primary),
-            label: 'Messages',
+      bottomNavigationBar: _buildBottomBar(scheme),
+    );
+  }
+
+  Widget _buildBottomBar(ColorScheme scheme) {
+    const labels = ['Messages', 'Silenced', 'Status'];
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(32, 0, 32, 8),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 14,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            for (var i = 0; i < labels.length; i++)
+              _barItem(scheme, i, labels[i]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _barItem(ColorScheme scheme, int i, String label) {
+    final active = _index == i;
+    final color = active ? AppColors.primary : scheme.onSurfaceVariant;
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => setState(() => _index = i),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: active
+              ? AppColors.primary.withValues(alpha: 0.18)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
           ),
-          NavigationDestination(
-            icon: _navIcon('bell-slash.svg', inactive),
-            selectedIcon: _navIcon('bell-slash.svg', AppColors.primary),
-            label: 'Silenced',
-          ),
-          NavigationDestination(
-            icon: _navIcon('shield.svg', inactive),
-            selectedIcon: _navIcon('shield.svg', AppColors.primary),
-            label: 'Status',
-          ),
-        ],
+        ),
       ),
     );
   }

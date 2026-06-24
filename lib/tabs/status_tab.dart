@@ -99,6 +99,14 @@ class StatusTab extends StatelessWidget {
             ],
           ),
         ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => context.read<AppState>().sendTestNotification(),
+            icon: const Icon(Icons.notifications_active_outlined, size: 18),
+            label: const Text('Send test notification'),
+          ),
+        ),
 
         if (!state.isDefaultSmsApp) ...[
           const SizedBox(height: 12),

@@ -6,6 +6,8 @@ import 'native_bridge.dart';
 
 /// App-wide state: default-app status, runtime permissions, the silence list,
 /// and the conversation list.
+enum MsgFilter { rings, silenced, all }
+
 class AppState extends ChangeNotifier {
   bool isDefaultSmsApp = false;
   bool smsGranted = false;
@@ -18,6 +20,7 @@ class AppState extends ChangeNotifier {
   bool loadingConversations = false;
   bool _askedDefaultThisSession = false;
   ThemeMode themeMode = ThemeMode.system;
+  MsgFilter msgFilter = MsgFilter.rings;
 
   bool get isReady => isDefaultSmsApp && smsGranted;
   int get mutedDefaultsCount => defaults.where((e) => e.silenced).length;
@@ -32,6 +35,11 @@ class AppState extends ChangeNotifier {
 
   Future<void> loadThemeMode() async {
     themeMode = _parseThemeMode(await NativeBridge.getThemeMode());
+    notifyListeners();
+  }
+
+  void setMsgFilter(MsgFilter f) {
+    msgFilter = f;
     notifyListeners();
   }
 
@@ -79,6 +87,17 @@ class AppState extends ChangeNotifier {
   Future<void> requestDefaultApp() async {
     await NativeBridge.requestDefaultSmsApp();
   }
+
+  /// On launch, make sure we have SMS + notification permission (so allowed
+  /// messages can actually alert). Prompts only for whatever is missing.
+  Future<void> ensureStartupPermissions() async {
+    await refreshStatus();
+    if (!smsGranted || !notificationsGranted) {
+      await requestPermissions();
+    }
+  }
+
+  Future<void> sendTestNotification() => NativeBridge.testNotification();
 
   /// Proactively ask to become the default SMS app on launch — once per
   /// session, only if not already default.

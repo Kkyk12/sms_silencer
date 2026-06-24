@@ -47,6 +47,7 @@ object NotificationHelper {
     }
 
     fun showSms(context: Context, sender: String, body: String, silenced: Boolean) {
+        if (silenced) return
         ensureChannels(context)
 
         val launch = context.packageManager
@@ -60,30 +61,21 @@ object NotificationHelper {
         }
         val contentIntent = PendingIntent.getActivity(context, 0, launch, piFlags)
 
-        val channel = if (silenced) CHANNEL_SILENCED else CHANNEL_RING
-        val builder = NotificationCompat.Builder(context, channel)
+        val builder = NotificationCompat.Builder(context, CHANNEL_RING)
             .setSmallIcon(R.drawable.ic_stat_sms)
             .setContentTitle(sender)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-
-        if (silenced) {
-            builder.priority = NotificationCompat.PRIORITY_LOW
-            builder.setSilent(true)
-        } else {
-            // Pre-26 devices honour these; 26+ devices use the channel settings above.
-            builder.priority = NotificationCompat.PRIORITY_HIGH
-            builder.setDefaults(NotificationCompat.DEFAULT_ALL)
-        }
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
 
         val id = (sender + "|" + body).hashCode()
         try {
             NotificationManagerCompat.from(context).notify(id, builder.build())
         } catch (_: SecurityException) {
-            // POST_NOTIFICATIONS not granted (Android 13+). The message is still
-            // saved to the inbox; we just can't show a heads-up for it.
+            // POST_NOTIFICATIONS not granted (Android 13+).
         }
     }
 }

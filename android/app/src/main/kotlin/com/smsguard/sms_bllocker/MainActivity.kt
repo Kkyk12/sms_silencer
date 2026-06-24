@@ -101,6 +101,16 @@ class MainActivity : FlutterActivity() {
                         result.success(if (address.isNullOrBlank()) null else contactName(address))
                     }
 
+                    "testNotification" -> {
+                        NotificationHelper.showSms(
+                            this,
+                            "SMS Guard",
+                            "Test — messages that are allowed to ring will alert you like this.",
+                            false,
+                        )
+                        result.success(null)
+                    }
+
                     "getThemeMode" -> result.success(Prefs.getThemeMode(this))
 
                     "setThemeMode" -> {
