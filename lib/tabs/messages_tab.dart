@@ -206,13 +206,11 @@ class _ConversationTile extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 26,
-                    backgroundColor: silenced
-                        ? scheme.surfaceContainerHighest
-                        : AppColors.primary.withValues(alpha: 0.12),
+                    backgroundColor: scheme.surfaceContainerHighest,
                     child: Text(
                       _initial(convo.displayName),
                       style: TextStyle(
-                        color: silenced ? scheme.onSurfaceVariant : AppColors.primary,
+                        color: scheme.onSurfaceVariant,
                         fontWeight: FontWeight.w600,
                         fontSize: 18,
                       ),
@@ -250,7 +248,7 @@ class _ConversationTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 15,
-                            color: scheme.onSurface,
+                            color: scheme.onSurfaceVariant,
                             fontWeight:
                                 unread ? FontWeight.w700 : FontWeight.w600,
                           ),
@@ -261,7 +259,7 @@ class _ConversationTile extends StatelessWidget {
                         _formatDate(convo.date),
                         style: TextStyle(
                           fontSize: 12,
-                          color: unread ? AppColors.primary : scheme.onSurfaceVariant,
+                          color: scheme.onSurfaceVariant,
                           fontWeight:
                               unread ? FontWeight.w600 : FontWeight.normal,
                         ),

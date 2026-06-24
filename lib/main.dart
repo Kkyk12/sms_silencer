@@ -225,6 +225,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   context.read<AppState>().setMsgFilter(MsgFilter.silenced);
                 case 'all':
                   context.read<AppState>().setMsgFilter(MsgFilter.all);
+                case 'silenced_tab':
+                  setState(() => _index = 1);
                 case 'status':
                   setState(() => _index = 2);
               }
@@ -254,6 +256,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   ]),
                 ),
                 const PopupMenuDivider(),
+                const PopupMenuItem<String>(
+                  value: 'silenced_tab',
+                  child: Text('Silenced senders'),
+                ),
                 const PopupMenuItem<String>(
                   value: 'status',
                   child: Text('Status'),
@@ -295,65 +301,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   child: Icon(Icons.add, color: scheme.onSurfaceVariant),
                 )
               : null,
-      bottomNavigationBar: _buildBottomBar(scheme),
     );
   }
 
-  Widget _buildBottomBar(ColorScheme scheme) {
-    const labels = ['Messages', 'Silenced', 'Status'];
-    return SafeArea(
-      top: false,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(32, 0, 32, 8),
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.16),
-              blurRadius: 14,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            for (var i = 0; i < labels.length; i++)
-              _barItem(scheme, i, labels[i]),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _barItem(ColorScheme scheme, int i, String label) {
-    final active = _index == i;
-    final color = active ? AppColors.primary : scheme.onSurfaceVariant;
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () => setState(() => _index = i),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: active
-              ? AppColors.primary.withValues(alpha: 0.18)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontSize: 13,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Persistent reminder shown until the app is set as the default SMS app.
