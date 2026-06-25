@@ -8,6 +8,7 @@ import '../app_state.dart';
 import '../app_theme.dart';
 import '../models.dart';
 import '../native_bridge.dart';
+import 'scheduled_messages_screen.dart';
 
 class ThreadScreen extends StatefulWidget {
   const ThreadScreen({super.key, required this.address});
@@ -127,6 +128,31 @@ class _ThreadScreenState extends State<ThreadScreen> {
     });
   }
 
+  void _toast(String message, {IconData? icon, bool error = false}) {
+    if (!mounted) return;
+    final scheme = Theme.of(context).colorScheme;
+    final bg = error ? scheme.errorContainer : scheme.secondaryContainer;
+    final fg = error ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Row(
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 18, color: fg),
+              const SizedBox(width: 10),
+            ],
+            Expanded(child: Text(message, style: TextStyle(color: fg))),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        backgroundColor: bg,
+        duration: Duration(seconds: error ? 3 : 2),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      ));
+  }
+
   Future<void> _send({int? subId}) async {
     final text = _input.text.trim();
     if (text.isEmpty || _sending) return;
@@ -140,9 +166,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
       _appState?.saveDraft(widget.address, ''); // clear draft on send
       await _load();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Couldn\'t send the message.')),
-      );
+      _toast('Couldn\'t send the message.',
+          icon: Icons.error_outline_rounded, error: true);
     }
     if (mounted) setState(() => _sending = false);
   }
@@ -188,21 +213,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
 
   void _silenceSender() {
     context.read<AppState>().addCustom(widget.address);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$_displayName will be silenced.')),
-    );
+    _toast('$_displayName will be silenced.', icon: Icons.volume_off_rounded);
   }
 
-  void _togglePin() {
-    context.read<AppState>().togglePin(widget.address);
+  Future<void> _togglePin() async {
+    await context.read<AppState>().togglePin(widget.address);
+    if (!mounted) return;
     final pinned = context.read<AppState>().isPinned(widget.address);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content: Text(pinned
-              ? '$_displayName pinned.'
-              : '$_displayName unpinned.')),
+    _toast(
+      pinned ? '$_displayName pinned.' : '$_displayName unpinned.',
+      icon: pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
     );
-    setState(() {}); // rebuild to update menu icon
+    setState(() {});
   }
 
   Future<void> _toggleBlock() async {
@@ -237,20 +259,34 @@ class _ThreadScreenState extends State<ThreadScreen> {
       await state.removeBlocked(widget.address);
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$_displayName unblocked.')),
-        );
+        _toast('$_displayName unblocked.', icon: Icons.lock_open_rounded);
       }
     }
+  }
+
+  void _markRead() {
+    context.read<AppState>().markRead(widget.address);
+    _toast('Marked as read.', icon: Icons.mark_email_read_outlined);
+  }
+
+  void _openScheduled() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScheduledMessagesScreen(
+          address: widget.address,
+          displayName: _displayName,
+        ),
+      ),
+    ).then((_) => _load());
   }
 
   /// Schedule the current composer text to be sent at a chosen time.
   Future<void> _scheduleMessage() async {
     final text = _input.text.trim();
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Type a message first.')),
-      );
+      _toast('Type a message first.',
+          icon: Icons.edit_outlined, error: true);
       return;
     }
     final scheduled = await showModalBottomSheet<DateTime>(
@@ -261,9 +297,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
     );
     if (scheduled == null || !mounted) return;
     if (scheduled.isBefore(DateTime.now())) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please pick a future time.')),
-      );
+      _toast('Please pick a future time.',
+          icon: Icons.schedule_outlined, error: true);
       return;
     }
     await NativeBridge.scheduleMessage(
@@ -271,11 +306,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
     _input.clear();
     await _load();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              'Scheduled for ${DateFormat('MMM d, h:mm a').format(scheduled)}.'),
-        ),
+      _toast(
+        'Scheduled for ${DateFormat('MMM d, h:mm a').format(scheduled)}.',
+        icon: Icons.check_circle_outline_rounded,
       );
     }
   }
@@ -466,29 +499,50 @@ class _ThreadScreenState extends State<ThreadScreen> {
               actions: [
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  elevation: 2,
                   onSelected: (v) {
                     switch (v) {
-                      case 'silence':
-                        _silenceSender();
-                      case 'pin':
-                        _togglePin();
-                      case 'block':
-                        _toggleBlock();
+                      case 'silence': _silenceSender();
+                      case 'pin': _togglePin();
+                      case 'block': _toggleBlock();
+                      case 'read': _markRead();
+                      case 'scheduled': _openScheduled();
                     }
                   },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                        value: 'silence', child: Text('Silence sender')),
-                    PopupMenuItem(
+                  itemBuilder: (ctx) {
+                    Widget item(IconData ic, String label) => Row(children: [
+                          Icon(ic, size: 20),
+                          const SizedBox(width: 14),
+                          Text(label),
+                        ]);
+                    return <PopupMenuEntry<String>>[
+                      PopupMenuItem(
+                        value: 'silence',
+                        child: item(Icons.notifications_off_outlined,
+                            'Silence sender'),
+                      ),
+                      PopupMenuItem(
                         value: 'pin',
-                        child: Text(pinned
-                            ? 'Unpin conversation'
-                            : 'Pin conversation')),
-                    PopupMenuItem(
+                        child: item(pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                            pinned ? 'Unpin' : 'Pin'),
+                      ),
+                      PopupMenuItem(
                         value: 'block',
-                        child: Text(
-                            blocked ? 'Unblock number' : 'Block number')),
-                  ],
+                        child: item(blocked ? Icons.block : Icons.block_outlined,
+                            blocked ? 'Unblock' : 'Block'),
+                      ),
+                      PopupMenuItem(
+                        value: 'read',
+                        child: item(Icons.mark_email_read_outlined, 'Mark as read'),
+                      ),
+                      PopupMenuItem(
+                        value: 'scheduled',
+                        child: item(Icons.schedule_outlined, 'Scheduled'),
+                      ),
+                    ];
+                  },
                 ),
               ],
             ),
@@ -1123,15 +1177,15 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
                   ),
                 ),
               ),
-              // Selection band (two accent lines around center row)
+              // Selection band (two lines around center row)
               IgnorePointer(
                 child: Center(
                   child: Container(
                     height: _itemH,
                     decoration: BoxDecoration(
                       border: Border(
-                        top: BorderSide(color: scheme.primary, width: 1.5),
-                        bottom: BorderSide(color: scheme.primary, width: 1.5),
+                        top: BorderSide(color: scheme.outline, width: 1.5),
+                        bottom: BorderSide(color: scheme.outline, width: 1.5),
                       ),
                     ),
                   ),
@@ -1147,7 +1201,7 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
               20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
           child: SizedBox(
             width: double.infinity,
-            child: FilledButton(
+            child: FilledButton.tonal(
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(

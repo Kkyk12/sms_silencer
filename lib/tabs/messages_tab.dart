@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -281,8 +282,12 @@ class _MessagesTabState extends State<MessagesTab>
     }
 
     // Sort: pinned first → with draft second → by date.
+    // Use live pin state (state.isPinned) so re-ordering is instant, before
+    // the native conversation list reloads.
     list = [...list]..sort((a, b) {
-        if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+        final aPin = state.isPinned(a.address);
+        final bPin = state.isPinned(b.address);
+        if (aPin != bPin) return aPin ? -1 : 1;
         final aDraft = state.getDraft(a.address).isNotEmpty;
         final bDraft = state.getDraft(b.address).isNotEmpty;
         if (aDraft != bDraft) return aDraft ? -1 : 1;
@@ -332,6 +337,7 @@ class _MessagesTabState extends State<MessagesTab>
                             convo: c,
                             selecting: _selecting,
                             selected: _selected.contains(c.address),
+                            pinned: state.isPinned(c.address),
                             contactPhoto: photo,
                             draft: draft,
                             onTap: () => _selecting ? _toggle(c) : _open(c),
@@ -348,6 +354,21 @@ class _MessagesTabState extends State<MessagesTab>
   Widget _selectionBar(ColorScheme scheme, List<Conversation> list) {
     final state = context.watch<AppState>();
     final anyUnpinned = _selected.any((a) => !state.isPinned(a));
+
+    Widget svgBtn(String asset, String tooltip, VoidCallback onTap) {
+      return IconButton(
+        tooltip: tooltip,
+        onPressed: onTap,
+        icon: SvgPicture.asset(
+          asset,
+          width: 22,
+          height: 22,
+          colorFilter:
+              ColorFilter.mode(scheme.onSurfaceVariant, BlendMode.srcIn),
+        ),
+      );
+    }
+
     return Container(
       color: AppColors.primary.withValues(alpha: 0.08),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -370,31 +391,15 @@ class _MessagesTabState extends State<MessagesTab>
               () => _selected.addAll(list.map((c) => c.address)),
             ),
           ),
-          IconButton(
-            icon: Icon(anyUnpinned ? Icons.push_pin_outlined : Icons.push_pin),
-            tooltip: anyUnpinned ? 'Pin' : 'Unpin',
-            onPressed: _pinSelected,
-          ),
-          IconButton(
-            icon: const Icon(Icons.block_outlined),
-            tooltip: 'Block',
-            onPressed: _blockSelected,
-          ),
-          IconButton(
-            icon: const Icon(Icons.folder_outlined),
-            tooltip: 'Add to folder',
-            onPressed: _addSelectedToFolder,
-          ),
-          IconButton(
-            icon: const Icon(Icons.notifications_off_outlined),
-            tooltip: 'Silence',
-            onPressed: _silenceSelected,
-          ),
-          IconButton(
-            icon: const Icon(Icons.mark_email_read_outlined),
-            tooltip: 'Mark as read',
-            onPressed: _markSelectedRead,
-          ),
+          svgBtn('assets/icons/push-pin.svg',
+              anyUnpinned ? 'Pin' : 'Unpin', _pinSelected),
+          svgBtn('assets/icons/prohibit.svg', 'Block', _blockSelected),
+          svgBtn('assets/icons/folder-simple.svg', 'Add to folder',
+              _addSelectedToFolder),
+          svgBtn('assets/icons/bell-simple-slash.svg', 'Silence',
+              _silenceSelected),
+          svgBtn('assets/icons/envelope-open.svg', 'Mark as read',
+              _markSelectedRead),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             tooltip: 'Delete',
@@ -573,6 +578,7 @@ class _ConversationTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onLongPress,
+    this.pinned = false,
     this.contactPhoto,
     this.draft = '',
   });
@@ -580,6 +586,7 @@ class _ConversationTile extends StatelessWidget {
   final Conversation convo;
   final bool selecting;
   final bool selected;
+  final bool pinned;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final Uint8List? contactPhoto;
@@ -590,7 +597,6 @@ class _ConversationTile extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final silenced = convo.silenced;
     final blocked = convo.blocked;
-    final pinned = convo.pinned;
     final unread = convo.unread > 0;
 
     return InkWell(

@@ -10,6 +10,7 @@ import 'app_theme.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 import 'screens/new_message_screen.dart';
+import 'screens/scheduled_messages_screen.dart';
 import 'screens/thread_screen.dart';
 import 'tabs/messages_tab.dart';
 import 'tabs/silenced_tab.dart';
@@ -340,6 +341,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   setState(() => _index = 1);
                 case 'status':
                   setState(() => _index = 2);
+                case 'scheduled':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => const ScheduledMessagesScreen()),
+                  );
               }
             },
             itemBuilder: (_) {
@@ -367,6 +373,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   ]),
                 ),
                 const PopupMenuDivider(),
+                const PopupMenuItem<String>(
+                  value: 'scheduled',
+                  child: Row(children: [
+                    Icon(Icons.schedule_outlined, size: 20),
+                    SizedBox(width: 14),
+                    Text('Scheduled messages'),
+                  ]),
+                ),
                 const PopupMenuItem<String>(
                   value: 'silenced_tab',
                   child: Text('Silenced senders'),

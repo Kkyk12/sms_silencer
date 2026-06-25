@@ -45,6 +45,6 @@ class ReplyReceiver : BroadcastReceiver() {
             context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, cv)
         } catch (_: Exception) { }
 
-        NotificationHelper.showReplySent(context, notifId, sender)
+        NotificationHelper.showReplySent(context, sender, replyText, notifId)
     }
 }

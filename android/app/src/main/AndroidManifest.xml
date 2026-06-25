@@ -87,6 +87,16 @@
             android:name=".ReplyReceiver"
             android:exported="false"/>
 
+        <!-- Clears per-sender notification history when a notification is dismissed -->
+        <receiver
+            android:name=".NotifDismissReceiver"
+            android:exported="false"/>
+
+        <!-- Handles the "Mark as read" notification action -->
+        <receiver
+            android:name=".MarkReadReceiver"
+            android:exported="false"/>
+
         <!-- Fires scheduled messages when their AlarmManager alarm triggers -->
         <receiver
             android:name=".ScheduleReceiver"
