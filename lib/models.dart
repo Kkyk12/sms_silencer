@@ -137,6 +137,27 @@ class ScheduledMessage {
       );
 }
 
+/// A phone contact (from the device address book), used in compose search.
+class ContactEntry {
+  final String name;
+  final String number;
+  final String? photoUri;
+
+  const ContactEntry({
+    required this.name,
+    required this.number,
+    this.photoUri,
+  });
+
+  String get displayName => name.trim().isNotEmpty ? name.trim() : number;
+
+  factory ContactEntry.fromMap(Map<String, dynamic> m) => ContactEntry(
+        name: (m['name'] as String?) ?? '',
+        number: (m['number'] as String?) ?? '',
+        photoUri: m['photoUri'] as String?,
+      );
+}
+
 /// A single message inside a thread (sent or received).
 class ThreadMessage {
   final int id;

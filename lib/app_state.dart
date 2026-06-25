@@ -56,8 +56,11 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     await loadThemeMode(); // must be first — drives theme before first frame
+    // refreshStatus() must finish before loadConversations(): the latter is
+    // gated on smsGranted, so running them in parallel can load an empty inbox
+    // (smsGranted still false) and the list stays blank until a manual refresh.
+    await refreshStatus();
     await Future.wait([
-      refreshStatus(),
       loadSilenceList(),
       loadConversations(),
       loadFolders(),
@@ -233,7 +236,11 @@ class AppState extends ChangeNotifier {
   Future<void> ensureStartupPermissions() async {
     await refreshStatus();
     if (!smsGranted || !notificationsGranted || !phoneGranted) {
-      await requestPermissions();
+      await requestPermissions(); // this reloads conversations once granted
+    } else if (conversations.isEmpty) {
+      // Already granted (e.g. we're the default SMS app) — populate the inbox
+      // so the user doesn't have to pull-to-refresh on every launch.
+      await loadConversations();
     }
   }
 

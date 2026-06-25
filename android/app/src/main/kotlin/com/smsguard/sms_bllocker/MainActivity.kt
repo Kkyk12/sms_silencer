@@ -294,6 +294,9 @@ class MainActivity : FlutterActivity() {
                         result.success(if (photoUri.isNullOrBlank()) null else getContactPhotoBytes(photoUri))
                     }
 
+                    // ── All phone contacts (for compose search) ───────────────
+                    "getContacts" -> result.success(allContacts())
+
                     // ── Intent / deep-link address ────────────────────────────
                     "getInitialAddress" -> result.success(addressFromIntent(intent))
 
@@ -502,6 +505,44 @@ class MainActivity : FlutterActivity() {
 
     /** Saved contact name for one address, or null. */
     private fun contactName(address: String): String? = loadContactMaps().first[convKey(address)]
+
+    /** Every phone contact (name + number + optional photo), deduped by number. */
+    private fun allContacts(): List<Map<String, Any?>> {
+        val out = ArrayList<Map<String, Any?>>()
+        val seen = HashSet<String>()
+        try {
+            val cursor = contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.Contacts.PHOTO_THUMBNAIL_URI,
+                ),
+                null, null,
+                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} COLLATE NOCASE ASC",
+            )
+            cursor?.use { c ->
+                val iNum = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                val iName = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val iPhoto = c.getColumnIndex(ContactsContract.Contacts.PHOTO_THUMBNAIL_URI)
+                while (c.moveToNext()) {
+                    val num = if (iNum >= 0) c.getString(iNum) else null
+                    if (num.isNullOrBlank()) continue
+                    val key = convKey(num)
+                    if (!seen.add(key)) continue
+                    val name = if (iName >= 0) c.getString(iName) else null
+                    out.add(
+                        mapOf(
+                            "name" to (name ?: num),
+                            "number" to num,
+                            "photoUri" to (if (iPhoto >= 0) c.getString(iPhoto) else null),
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+        return out
+    }
 
     /** Read raw bytes from a content:// photo thumbnail URI. */
     private fun getContactPhotoBytes(photoUri: String): ByteArray? = try {

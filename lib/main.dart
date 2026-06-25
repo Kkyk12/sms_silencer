@@ -148,11 +148,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       context.read<AppState>().refreshOnResume();
-      // Some phones take a moment to update the default SMS app registry.
-      // Retry a few times so the red banner disappears promptly.
+      // Some phones take a moment to update the default SMS app registry /
+      // grant SMS access. Retry a few times so the banner clears and the inbox
+      // populates without a manual pull-to-refresh.
       for (final ms in [600, 1500, 3500]) {
-        Future.delayed(Duration(milliseconds: ms), () {
-          if (mounted) context.read<AppState>().refreshStatus();
+        Future.delayed(Duration(milliseconds: ms), () async {
+          if (!mounted) return;
+          final st = context.read<AppState>();
+          await st.refreshStatus();
+          if (st.smsGranted && st.conversations.isEmpty) {
+            await st.loadConversations();
+          }
         });
       }
     }

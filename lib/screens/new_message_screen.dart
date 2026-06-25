@@ -5,9 +5,11 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../app_theme.dart';
 import '../models.dart';
+import '../native_bridge.dart';
 import 'thread_screen.dart';
 
-/// Full-screen "compose new message" — search existing contacts / type a number.
+/// Full-screen "compose new message" — search existing threads & all phone
+/// contacts, or type a raw number.
 class NewMessageScreen extends StatefulWidget {
   const NewMessageScreen({super.key});
 
@@ -18,6 +20,24 @@ class NewMessageScreen extends StatefulWidget {
 class _NewMessageScreenState extends State<NewMessageScreen> {
   final _ctrl = TextEditingController();
   String _query = '';
+  List<ContactEntry> _contacts = const [];
+  bool _loadingContacts = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContacts();
+  }
+
+  Future<void> _loadContacts() async {
+    final contacts = await NativeBridge.getContacts();
+    if (mounted) {
+      setState(() {
+        _contacts = contacts;
+        _loadingContacts = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -46,23 +66,54 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
         : DateFormat('MMM d').format(date);
   }
 
+  /// Conversation-key normalisation matching the native side (last 10 digits).
+  static String _convKey(String address) {
+    final digits = address.replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 7) {
+      return digits.length <= 10 ? digits : digits.substring(digits.length - 10);
+    }
+    return address.trim().toLowerCase();
+  }
+
   bool get _looksLikeNumber =>
-      _query.isNotEmpty &&
-      RegExp(r'^[\d\s\+\-\(\)]+$').hasMatch(_query);
+      _query.isNotEmpty && RegExp(r'^[\d\s\+\-\(\)]+$').hasMatch(_query);
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final scheme = Theme.of(context).colorScheme;
     final all = state.conversations;
+    final q = _query.toLowerCase();
 
-    final filtered = _query.isEmpty
+    // Existing conversations matching the query.
+    final convos = _query.isEmpty
         ? all
         : all.where((c) {
-            final q = _query.toLowerCase();
             return c.displayName.toLowerCase().contains(q) ||
                 c.address.toLowerCase().contains(q);
           }).toList();
+
+    // Phone contacts that don't already have a conversation thread.
+    final convoKeys = {for (final c in all) _convKey(c.address)};
+    final contactMatches = _contacts.where((ct) {
+      if (convoKeys.contains(_convKey(ct.number))) return false;
+      if (_query.isEmpty) return true;
+      return ct.name.toLowerCase().contains(q) ||
+          ct.number.toLowerCase().contains(q);
+    }).toList();
+
+    // Flatten into rows with section headers.
+    final rows = <Object>[];
+    if (convos.isNotEmpty) {
+      rows.add(_query.isEmpty ? 'Recent conversations' : 'Conversations');
+      rows.addAll(convos);
+    }
+    if (contactMatches.isNotEmpty) {
+      rows.add('Contacts');
+      rows.addAll(contactMatches);
+    }
+
+    final nothing = rows.isEmpty && !_looksLikeNumber;
 
     return Scaffold(
       appBar: AppBar(title: const Text('New message')),
@@ -83,8 +134,7 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
               },
               decoration: InputDecoration(
                 hintText: 'Search name or type a number…',
-                prefixIcon:
-                    Icon(Icons.search, color: scheme.onSurfaceVariant),
+                prefixIcon: Icon(Icons.search, color: scheme.onSurfaceVariant),
                 suffixIcon: _query.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.close),
@@ -102,8 +152,7 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
           if (_looksLikeNumber)
             ListTile(
               leading: CircleAvatar(
-                backgroundColor:
-                    AppColors.primary.withValues(alpha: 0.12),
+                backgroundColor: AppColors.primary.withValues(alpha: 0.12),
                 child: const Icon(Icons.dialpad,
                     color: AppColors.primary, size: 20),
               ),
@@ -115,54 +164,61 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
               onTap: () => _open(_query),
             ),
 
-          // ── Section header ─────────────────────────────────────────────
-          if (filtered.isNotEmpty)
-            Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(
-                _query.isEmpty ? 'Recent conversations' : 'Results',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      letterSpacing: 0.4,
-                    ),
-              ),
-            ),
-
           // ── List ───────────────────────────────────────────────────────
           Expanded(
-            child: filtered.isEmpty
+            child: nothing
                 ? Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.search_off,
-                            size: 48, color: scheme.outlineVariant),
-                        const SizedBox(height: 12),
-                        Text(
-                          'No conversations found',
-                          style: TextStyle(color: scheme.onSurfaceVariant),
-                        ),
+                        if (_loadingContacts) ...[
+                          const CircularProgressIndicator(),
+                        ] else ...[
+                          Icon(Icons.search_off,
+                              size: 48, color: scheme.outlineVariant),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No matches found',
+                            style: TextStyle(color: scheme.onSurfaceVariant),
+                          ),
+                        ],
                       ],
                     ),
                   )
-                : ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) => Divider(
-                      height: 1,
-                      indent: 76,
-                      endIndent: 16,
-                      color:
-                          scheme.outlineVariant.withValues(alpha: 0.5),
-                    ),
+                : ListView.builder(
+                    itemCount: rows.length,
                     itemBuilder: (_, i) {
-                      final c = filtered[i];
-                      return _ConvoTile(
-                        convo: c,
+                      final row = rows[i];
+                      if (row is String) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+                          child: Text(
+                            row,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  letterSpacing: 0.4,
+                                ),
+                          ),
+                        );
+                      }
+                      if (row is Conversation) {
+                        return _ConvoTile(
+                          convo: row,
+                          scheme: scheme,
+                          onTap: () => _open(row.address),
+                          initial: _initial(row.displayName),
+                          dateLabel: _formatDate(row.date),
+                        );
+                      }
+                      final ct = row as ContactEntry;
+                      return _ContactTile(
+                        contact: ct,
                         scheme: scheme,
-                        onTap: () => _open(c.address),
-                        initial: _initial(c.displayName),
-                        dateLabel: _formatDate(c.date),
+                        initial: _initial(ct.displayName),
+                        onTap: () => _open(ct.number),
                       );
                     },
                   ),
@@ -193,8 +249,7 @@ class _ConvoTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
             CircleAvatar(
@@ -240,6 +295,74 @@ class _ConvoTile extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     convo.lastBody.replaceAll('\n', ' '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ContactTile extends StatelessWidget {
+  const _ContactTile({
+    required this.contact,
+    required this.scheme,
+    required this.initial,
+    required this.onTap,
+  });
+
+  final ContactEntry contact;
+  final ColorScheme scheme;
+  final String initial;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: scheme.surfaceContainerHighest,
+              child: Text(
+                initial,
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 17,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    contact.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    contact.number,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

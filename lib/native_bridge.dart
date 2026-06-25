@@ -221,6 +221,18 @@ class NativeBridge {
         .toList();
   }
 
+  // ── Contacts ──────────────────────────────────────────────────────────────
+
+  /// Every phone contact (name + number + optional photo). Empty if the
+  /// READ_CONTACTS permission hasn't been granted.
+  static Future<List<ContactEntry>> getContacts() async {
+    final raw = await _channel.invokeListMethod<dynamic>('getContacts');
+    if (raw == null) return <ContactEntry>[];
+    return raw
+        .map((e) => ContactEntry.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
   // ── Contact photos ────────────────────────────────────────────────────────
 
   static Future<Uint8List?> getContactPhotoBytes(String photoUri) async {
