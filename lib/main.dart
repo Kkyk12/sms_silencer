@@ -1,5 +1,8 @@
 import 'dart:async';
 
+// CupertinoPageTransitionsBuilder lives in the cupertino library (not material)
+// as of recent Flutter; import it explicitly for the iOS-style page transitions.
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +10,7 @@ import 'package:provider/provider.dart';
 
 import 'app_state.dart';
 import 'app_theme.dart';
+import 'identity.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 import 'screens/new_message_screen.dart';
@@ -83,7 +87,10 @@ class SmsGuardApp extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           borderSide: BorderSide.none,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 12,
+        ),
       ),
       // iOS-style swipe-from-left-edge to go back, on Android too.
       pageTransitionsTheme: const PageTransitionsTheme(
@@ -120,14 +127,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       // Read the launch address first — before any dialogs that could steal focus
       // or cause some devices to clear intent extras on the next resume.
       final addr = await NativeBridge.getInitialAddress();
+      if (!mounted) return;
 
       final st = context.read<AppState>();
       await st.ensureStartupPermissions();
 
       if (addr != null && addr.isNotEmpty && mounted) {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ThreadScreen(address: addr)),
-        );
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => ThreadScreen(address: addr)));
         return; // skip the default-app prompt when opened from the dialer
       }
 
@@ -177,11 +185,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       return;
     }
 
+    // A scheduled message was sent, or a send result landed — just refresh.
+    if (data['type'] == 'refresh') {
+      if (mounted) context.read<AppState>().loadConversations();
+      return;
+    }
+
     final address = data['sender'] as String? ?? '';
     final body = data['body'] as String? ?? '';
     final state = context.read<AppState>();
     final convo = state.conversations
-        .where((c) => c.address == address)
+        .where((c) => sameAddress(c.address, address))
         .firstOrNull;
     final displayName = convo?.displayName ?? address;
     state.loadConversations();
@@ -258,49 +272,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _openNewMessage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const NewMessageScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const NewMessageScreen()));
     if (mounted) context.read<AppState>().loadConversations();
-  }
-
-  // kept for reference — replaced by _openNewMessage
-  Future<void> _showNewMessageDialog() async {
-    final controller = TextEditingController();
-    final number = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('New message'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
-            labelText: 'Recipient',
-            hintText: 'e.g. +251912345678',
-          ),
-          onSubmitted: (v) => Navigator.pop(context, v),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Next'),
-          ),
-        ],
-      ),
-    );
-    if (number != null && number.trim().isNotEmpty && mounted) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ThreadScreen(address: number.trim()),
-        ),
-      );
-      if (mounted) context.read<AppState>().loadConversations();
-    }
   }
 
   @override
@@ -324,8 +299,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               'assets/icons/magnifying-glass.svg',
               width: 22,
               height: 22,
-              colorFilter:
-                  ColorFilter.mode(scheme.onSurface, BlendMode.srcIn),
+              colorFilter: ColorFilter.mode(scheme.onSurface, BlendMode.srcIn),
             ),
             onPressed: () => showSearch(
               context: context,
@@ -350,7 +324,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 case 'scheduled':
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                        builder: (_) => const ScheduledMessagesScreen()),
+                      builder: (_) => const ScheduledMessagesScreen(),
+                    ),
                   );
               }
             },
@@ -359,33 +334,43 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               return [
                 PopupMenuItem<String>(
                   value: 'rings',
-                  child: Row(children: [
-                    const Expanded(child: Text('Rings only')),
-                    if (f == MsgFilter.rings) const Icon(Icons.check, size: 18),
-                  ]),
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text('Rings only')),
+                      if (f == MsgFilter.rings)
+                        const Icon(Icons.check, size: 18),
+                    ],
+                  ),
                 ),
                 PopupMenuItem<String>(
                   value: 'silenced',
-                  child: Row(children: [
-                    const Expanded(child: Text('Silenced')),
-                    if (f == MsgFilter.silenced) const Icon(Icons.check, size: 18),
-                  ]),
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text('Silenced')),
+                      if (f == MsgFilter.silenced)
+                        const Icon(Icons.check, size: 18),
+                    ],
+                  ),
                 ),
                 PopupMenuItem<String>(
                   value: 'all',
-                  child: Row(children: [
-                    const Expanded(child: Text('All messages')),
-                    if (f == MsgFilter.all) const Icon(Icons.check, size: 18),
-                  ]),
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text('All messages')),
+                      if (f == MsgFilter.all) const Icon(Icons.check, size: 18),
+                    ],
+                  ),
                 ),
                 const PopupMenuDivider(),
                 const PopupMenuItem<String>(
                   value: 'scheduled',
-                  child: Row(children: [
-                    Icon(Icons.schedule_outlined, size: 20),
-                    SizedBox(width: 14),
-                    Text('Scheduled messages'),
-                  ]),
+                  child: Row(
+                    children: [
+                      Icon(Icons.schedule_outlined, size: 20),
+                      SizedBox(width: 14),
+                      Text('Scheduled messages'),
+                    ],
+                  ),
                 ),
                 const PopupMenuItem<String>(
                   value: 'silenced_tab',
@@ -424,16 +409,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               child: Icon(Icons.edit_outlined, color: scheme.onSurfaceVariant),
             )
           : _index == 1
-              ? FloatingActionButton.small(
-                  onPressed: _showAddDialog,
-                  tooltip: 'Add sender',
-                  backgroundColor: scheme.surfaceContainerHighest,
-                  child: Icon(Icons.add, color: scheme.onSurfaceVariant),
-                )
-              : null,
+          ? FloatingActionButton.small(
+              onPressed: _showAddDialog,
+              tooltip: 'Add sender',
+              backgroundColor: scheme.surfaceContainerHighest,
+              child: Icon(Icons.add, color: scheme.onSurfaceVariant),
+            )
+          : null,
     );
   }
-
 }
 
 // ── In-app SMS banner ──────────────────────────────────────────────────────────
@@ -468,9 +452,10 @@ class _SmsBannerState extends State<_SmsBanner>
       vsync: this,
       duration: const Duration(milliseconds: 320),
     );
-    _slide = Tween(begin: const Offset(0, -1), end: Offset.zero).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
-    );
+    _slide = Tween(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack));
     _ctrl.forward();
     _timer = Timer(const Duration(seconds: 4), _dismiss);
   }
@@ -565,8 +550,11 @@ class _SmsBannerState extends State<_SmsBanner>
                   const SizedBox(width: 8),
                   GestureDetector(
                     onTap: _dismiss,
-                    child: Icon(Icons.close,
-                        size: 18, color: scheme.onSurfaceVariant),
+                    child: Icon(
+                      Icons.close,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -583,7 +571,7 @@ class _SmsBannerState extends State<_SmsBanner>
 /// Searches conversations by contact name, number, or last message text.
 class _ConvoSearchDelegate extends SearchDelegate<void> {
   _ConvoSearchDelegate(this.conversations)
-      : super(searchFieldLabel: 'Search messages');
+    : super(searchFieldLabel: 'Search messages');
 
   final List<Conversation> conversations;
 
@@ -604,18 +592,15 @@ class _ConvoSearchDelegate extends SearchDelegate<void> {
 
   @override
   List<Widget> buildActions(BuildContext context) => [
-        if (query.isNotEmpty)
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => query = '',
-          ),
-      ];
+    if (query.isNotEmpty)
+      IconButton(icon: const Icon(Icons.close), onPressed: () => query = ''),
+  ];
 
   @override
   Widget buildLeading(BuildContext context) => IconButton(
-        icon: const Icon(Icons.arrow_back),
-        onPressed: () => close(context, null),
-      );
+    icon: const Icon(Icons.arrow_back),
+    onPressed: () => close(context, null),
+  );
 
   @override
   Widget buildResults(BuildContext context) => _buildList(context);
@@ -696,8 +681,10 @@ class _DefaultAppBanner extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
                 child: Row(
                   children: [
-                    Icon(Icons.warning_amber_rounded,
-                        color: scheme.onErrorContainer),
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: scheme.onErrorContainer,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(

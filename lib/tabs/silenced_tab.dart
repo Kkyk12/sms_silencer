@@ -21,7 +21,9 @@ class _SilencedTabState extends State<SilencedTab> {
 
     final defaults = q.isEmpty
         ? state.defaults
-        : state.defaults.where((e) => e.address.toLowerCase().contains(q)).toList();
+        : state.defaults
+              .where((e) => e.address.toLowerCase().contains(q))
+              .toList();
     final custom = q.isEmpty
         ? state.custom
         : state.custom.where((a) => a.toLowerCase().contains(q)).toList();
@@ -67,10 +69,9 @@ class _SilencedTabState extends State<SilencedTab> {
             '${state.activeSilencedCount} silenced  ·  '
             '${state.defaults.length} built-in  ·  '
             '${state.custom.length} added by you',
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ),
 
@@ -90,10 +91,16 @@ class _SilencedTabState extends State<SilencedTab> {
                     leading: CircleAvatar(
                       radius: 15,
                       backgroundColor: scheme.tertiaryContainer,
-                      child: Icon(Icons.person,
-                          size: 16, color: scheme.onTertiaryContainer),
+                      child: Icon(
+                        Icons.person,
+                        size: 16,
+                        color: scheme.onTertiaryContainer,
+                      ),
                     ),
-                    title: Text(custom[i], style: const TextStyle(fontSize: 14)),
+                    title: Text(
+                      custom[i],
+                      style: const TextStyle(fontSize: 14),
+                    ),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline),
                       tooltip: 'Remove',
@@ -118,8 +125,10 @@ class _SilencedTabState extends State<SilencedTab> {
                   if (i > 0) const Divider(height: 1),
                   ListTile(
                     dense: true,
-                    visualDensity:
-                        const VisualDensity(horizontal: -2, vertical: -4),
+                    visualDensity: const VisualDensity(
+                      horizontal: -2,
+                      vertical: -4,
+                    ),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                     leading: CircleAvatar(
                       radius: 14,
@@ -127,11 +136,15 @@ class _SilencedTabState extends State<SilencedTab> {
                       child: Text(
                         defaults[i].address.substring(0, 1).toUpperCase(),
                         style: TextStyle(
-                            color: scheme.onSurfaceVariant, fontSize: 11),
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 11,
+                        ),
                       ),
                     ),
-                    title: Text(defaults[i].address,
-                        style: const TextStyle(fontSize: 14)),
+                    title: Text(
+                      defaults[i].address,
+                      style: const TextStyle(fontSize: 14),
+                    ),
                     trailing: SizedBox(
                       width: 40,
                       child: Transform.scale(
@@ -145,7 +158,9 @@ class _SilencedTabState extends State<SilencedTab> {
                       ),
                     ),
                     onTap: () => context.read<AppState>().toggleDefault(
-                        defaults[i].address, !defaults[i].silenced),
+                      defaults[i].address,
+                      !defaults[i].silenced,
+                    ),
                   ),
                 ],
               ],
@@ -203,9 +218,9 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         text,
         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.primary,
-            ),
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.primary,
+        ),
       ),
     );
   }

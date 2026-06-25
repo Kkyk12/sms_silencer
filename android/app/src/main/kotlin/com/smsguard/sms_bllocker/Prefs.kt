@@ -14,11 +14,18 @@ data class ChatFolder(val id: String, val name: String, val addresses: Set<Strin
  *  - [DEFAULT_SILENCED] ships with the app and is silenced unless the user turns
  *    an entry off (stored in [KEY_UNSILENCED_DEFAULTS]).
  *  - The user can also add their own entries (stored in [KEY_CUSTOM_SILENCED]).
+ *
+ * Every mutator does a read-modify-write of SharedPreferences; the UI thread and
+ * the alarm/receiver threads can race, so all mutations are serialized through
+ * [lock] to avoid lost updates (B7).
  */
 object Prefs {
     private const val PREFS_NAME = "sms_guard_prefs"
     private const val KEY_UNSILENCED_DEFAULTS = "unsilenced_defaults"
     private const val KEY_CUSTOM_SILENCED = "custom_silenced"
+
+    /** Serializes read-modify-write sequences across UI + receiver threads. */
+    private val lock = Any()
 
     /** Built-in automated/bulk senders, silenced by default. */
     val DEFAULT_SILENCED: List<String> = listOf(
@@ -55,7 +62,7 @@ object Prefs {
     fun isDefaultSilenced(context: Context, address: String): Boolean =
         !getSet(context, KEY_UNSILENCED_DEFAULTS).contains(address)
 
-    fun setDefaultSilenced(context: Context, address: String, silenced: Boolean) {
+    fun setDefaultSilenced(context: Context, address: String, silenced: Boolean) = synchronized(lock) {
         val off = getSet(context, KEY_UNSILENCED_DEFAULTS)
         if (silenced) off.remove(address) else off.add(address)
         putSet(context, KEY_UNSILENCED_DEFAULTS, off)
@@ -66,15 +73,15 @@ object Prefs {
     fun getCustomSilenced(context: Context): List<String> =
         getSet(context, KEY_CUSTOM_SILENCED).toList().sortedBy { it.lowercase() }
 
-    fun addCustomSilenced(context: Context, address: String) {
+    fun addCustomSilenced(context: Context, address: String) = synchronized(lock) {
         val trimmed = address.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty()) return@synchronized
         val set = getSet(context, KEY_CUSTOM_SILENCED)
         set.add(trimmed)
         putSet(context, KEY_CUSTOM_SILENCED, set)
     }
 
-    fun removeCustomSilenced(context: Context, address: String) {
+    fun removeCustomSilenced(context: Context, address: String) = synchronized(lock) {
         val set = getSet(context, KEY_CUSTOM_SILENCED)
         set.remove(address.trim())
         putSet(context, KEY_CUSTOM_SILENCED, set)
@@ -92,7 +99,7 @@ object Prefs {
     fun isSilenced(context: Context, sender: String): Boolean {
         val s = sender.trim()
         if (s.isEmpty()) return false
-        return activeSilenced(context).any { matches(it, s) }
+        return activeSilenced(context).any { Identity.matches(it, s) }
     }
 
     // ── Chat folders ─────────────────────────────────────────────────────────
@@ -129,19 +136,19 @@ object Prefs {
         prefs(context).edit().putString(KEY_FOLDERS, arr.toString()).apply()
     }
 
-    fun createFolder(context: Context, name: String): String {
+    fun createFolder(context: Context, name: String): String = synchronized(lock) {
         val id = System.currentTimeMillis().toString()
         val folders = getFolders(context).toMutableList()
         folders.add(ChatFolder(id = id, name = name, addresses = emptySet()))
         saveFolders(context, folders)
-        return id
+        id
     }
 
-    fun deleteFolder(context: Context, id: String) {
+    fun deleteFolder(context: Context, id: String) = synchronized(lock) {
         saveFolders(context, getFolders(context).filter { it.id != id })
     }
 
-    fun addToFolder(context: Context, folderId: String, addresses: Set<String>) {
+    fun addToFolder(context: Context, folderId: String, addresses: Set<String>) = synchronized(lock) {
         saveFolders(context, getFolders(context).map { f ->
             if (f.id == folderId) f.copy(addresses = f.addresses + addresses) else f
         })
@@ -153,20 +160,27 @@ object Prefs {
 
     fun getPinned(context: Context): Set<String> = getSet(context, KEY_PINNED).toSet()
 
-    fun addPinned(context: Context, address: String) {
+    fun addPinned(context: Context, address: String) = synchronized(lock) {
+        val key = Identity.normalize(address)
         val set = getSet(context, KEY_PINNED)
+        // Drop any differently-formatted duplicate of the same contact first.
+        set.removeAll { Identity.normalize(it) == key }
         set.add(address.trim())
         putSet(context, KEY_PINNED, set)
     }
 
-    fun removePinned(context: Context, address: String) {
+    fun removePinned(context: Context, address: String) = synchronized(lock) {
+        val key = Identity.normalize(address)
         val set = getSet(context, KEY_PINNED)
-        set.remove(address.trim())
+        set.removeAll { Identity.normalize(it) == key }
         putSet(context, KEY_PINNED, set)
     }
 
-    fun isPinned(context: Context, address: String): Boolean =
-        getSet(context, KEY_PINNED).contains(address.trim())
+    /** Normalize-aware so a contact stays pinned even if its number format shifts. */
+    fun isPinned(context: Context, address: String): Boolean {
+        val key = Identity.normalize(address)
+        return getSet(context, KEY_PINNED).any { Identity.normalize(it) == key }
+    }
 
     // ── Blocked addresses ────────────────────────────────────────────────────
 
@@ -175,13 +189,13 @@ object Prefs {
     fun getBlocked(context: Context): List<String> =
         getSet(context, KEY_BLOCKED).toList().sortedBy { it.lowercase() }
 
-    fun addBlocked(context: Context, address: String) {
+    fun addBlocked(context: Context, address: String) = synchronized(lock) {
         val set = getSet(context, KEY_BLOCKED)
         set.add(address.trim())
         putSet(context, KEY_BLOCKED, set)
     }
 
-    fun removeBlocked(context: Context, address: String) {
+    fun removeBlocked(context: Context, address: String) = synchronized(lock) {
         val set = getSet(context, KEY_BLOCKED)
         set.remove(address.trim())
         putSet(context, KEY_BLOCKED, set)
@@ -190,7 +204,7 @@ object Prefs {
     fun isBlocked(context: Context, sender: String): Boolean {
         val s = sender.trim()
         if (s.isEmpty()) return false
-        return getSet(context, KEY_BLOCKED).any { matches(it, s) }
+        return getSet(context, KEY_BLOCKED).any { Identity.matches(it, s) }
     }
 
     // ── Quick reply templates ────────────────────────────────────────────────
@@ -205,7 +219,7 @@ object Prefs {
         } catch (_: Exception) { emptyList() }
     }
 
-    fun saveTemplates(context: Context, templates: List<String>) {
+    fun saveTemplates(context: Context, templates: List<String>) = synchronized(lock) {
         val arr = JSONArray()
         templates.forEach { arr.put(it) }
         prefs(context).edit().putString(KEY_TEMPLATES, arr.toString()).apply()
@@ -214,8 +228,23 @@ object Prefs {
     // ── Scheduled messages ───────────────────────────────────────────────────
 
     private const val KEY_SCHEDULED = "scheduled_messages"
+    private const val KEY_REQUEST_SEQ = "alarm_request_seq"
 
-    data class ScheduledMsg(val id: String, val address: String, val body: String, val timeMillis: Long)
+    data class ScheduledMsg(
+        val id: String,
+        val address: String,
+        val body: String,
+        val timeMillis: Long,
+        /** Stable, unique AlarmManager request code (avoids hashCode collisions, B8). */
+        val requestCode: Int,
+    )
+
+    /** Monotonic, collision-free request code for a new alarm. */
+    fun nextRequestCode(context: Context): Int = synchronized(lock) {
+        val next = prefs(context).getInt(KEY_REQUEST_SEQ, 1) + 1
+        prefs(context).edit().putInt(KEY_REQUEST_SEQ, next).apply()
+        next
+    }
 
     fun getScheduled(context: Context): List<ScheduledMsg> {
         val json = prefs(context).getString(KEY_SCHEDULED, "[]") ?: "[]"
@@ -223,18 +252,25 @@ object Prefs {
             val arr = JSONArray(json)
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
-                ScheduledMsg(obj.getString("id"), obj.getString("address"), obj.getString("body"), obj.getLong("time"))
+                ScheduledMsg(
+                    id = obj.getString("id"),
+                    address = obj.getString("address"),
+                    body = obj.getString("body"),
+                    timeMillis = obj.getLong("time"),
+                    // Legacy rows had no requestCode; fall back to the old derivation.
+                    requestCode = obj.optInt("rc", obj.getString("id").hashCode()),
+                )
             }
         } catch (_: Exception) { emptyList() }
     }
 
-    fun addScheduled(context: Context, msg: ScheduledMsg) {
+    fun addScheduled(context: Context, msg: ScheduledMsg) = synchronized(lock) {
         val list = getScheduled(context).toMutableList()
         list.add(msg)
         saveScheduledList(context, list)
     }
 
-    fun removeScheduled(context: Context, id: String) {
+    fun removeScheduled(context: Context, id: String) = synchronized(lock) {
         saveScheduledList(context, getScheduled(context).filter { it.id != id })
     }
 
@@ -242,32 +278,16 @@ object Prefs {
         val arr = JSONArray()
         list.forEach { m ->
             arr.put(JSONObject().apply {
-                put("id", m.id); put("address", m.address); put("body", m.body); put("time", m.timeMillis)
+                put("id", m.id); put("address", m.address); put("body", m.body)
+                put("time", m.timeMillis); put("rc", m.requestCode)
             })
         }
         prefs(context).edit().putString(KEY_SCHEDULED, arr.toString()).apply()
     }
 
     /**
-     * Match a list entry against an incoming sender.
-     *  - Alphanumeric sender IDs (e.g. "Safaricom"): case-insensitive exact match.
-     *  - Short codes (e.g. "830"): exact digit match.
-     *  - Phone numbers: compare the last 9–10 digits so +251.., 0.. and 251.. agree.
+     * Match a list entry against an incoming sender. Delegates to the single
+     * canonical rule in [Identity] so silence/block agree with grouping (B1).
      */
-    fun matches(entry: String, sender: String): Boolean {
-        val e = entry.trim()
-        val s = sender.trim()
-        if (e.equals(s, ignoreCase = true)) return true
-
-        val ed = e.filter { it.isDigit() }
-        val sd = s.filter { it.isDigit() }
-        if (ed.isEmpty() || sd.isEmpty()) return false
-        if (ed == sd) return true
-
-        if (ed.length >= 9 && sd.length >= 9) {
-            val n = minOf(ed.length, sd.length, 10)
-            return ed.takeLast(n) == sd.takeLast(n)
-        }
-        return false
-    }
+    fun matches(entry: String, sender: String): Boolean = Identity.matches(entry, sender)
 }

@@ -36,8 +36,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
 
   bool get _selecting => _selectedIds.isNotEmpty;
 
-  String get _displayName =>
-      (_name != null && _name!.trim().isNotEmpty) ? _name!.trim() : widget.address;
+  String get _displayName => (_name != null && _name!.trim().isNotEmpty)
+      ? _name!.trim()
+      : widget.address;
 
   static String _initial(String s) {
     final t = s.trim();
@@ -52,8 +53,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
       final draft = _appState!.getDraft(widget.address);
       if (draft.isNotEmpty) {
         _input.text = draft;
-        _input.selection =
-            TextSelection.fromPosition(TextPosition(offset: draft.length));
+        _input.selection = TextSelection.fromPosition(
+          TextPosition(offset: draft.length),
+        );
       }
     });
     _load();
@@ -65,11 +67,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
       NativeBridge.getSims(),
       NativeBridge.getDefaultSmsSubId(),
     ]);
-    if (mounted) setState(() {
-      _sims = results[0] as List<SimInfo>;
-      _defaultSubId = results[1] as int;
-      if (_selectedSubId == -1) _selectedSubId = _defaultSubId;
-    });
+    if (mounted) {
+      setState(() {
+        _sims = results[0] as List<SimInfo>;
+        _defaultSubId = results[1] as int;
+        if (_selectedSubId == -1) _selectedSubId = _defaultSubId;
+      });
+    }
   }
 
   /// SIM tag ("SIM1"/"SIM2") for a message, or null when there's only one SIM
@@ -135,22 +139,28 @@ class _ThreadScreenState extends State<ThreadScreen> {
     final fg = error ? scheme.onErrorContainer : scheme.onSecondaryContainer;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        content: Row(
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 18, color: fg),
-              const SizedBox(width: 10),
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 18, color: fg),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(message, style: TextStyle(color: fg)),
+              ),
             ],
-            Expanded(child: Text(message, style: TextStyle(color: fg))),
-          ],
+          ),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          backgroundColor: bg,
+          duration: Duration(seconds: error ? 3 : 2),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         ),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        backgroundColor: bg,
-        duration: Duration(seconds: error ? 3 : 2),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      ));
+      );
   }
 
   Future<void> _send({int? subId}) async {
@@ -158,42 +168,53 @@ class _ThreadScreenState extends State<ThreadScreen> {
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
     final effectiveSubId = subId ?? _selectedSubId;
-    final ok = await NativeBridge.sendSms(widget.address, text,
-        subId: effectiveSubId);
+    final ok = await NativeBridge.sendSms(
+      widget.address,
+      text,
+      subId: effectiveSubId,
+    );
     if (!mounted) return;
     if (ok) {
       _input.clear();
       _appState?.saveDraft(widget.address, ''); // clear draft on send
       await _load();
+      // The row starts as "sending" and flips to sent/failed when the radio
+      // reports back; reload shortly after to reflect the final status (B4).
+      _scheduleStatusReload();
     } else {
-      _toast('Couldn\'t send the message.',
-          icon: Icons.error_outline_rounded, error: true);
+      _toast(
+        'Couldn\'t send the message.',
+        icon: Icons.error_outline_rounded,
+        error: true,
+      );
     }
     if (mounted) setState(() => _sending = false);
   }
 
-  Future<void> _deleteMessage(ThreadMessage m) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete message?'),
-        content: Text(m.body, maxLines: 4, overflow: TextOverflow.ellipsis),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await NativeBridge.deleteMessage(m.id);
-      await _load();
+  /// Re-poll the thread a couple of times so the OUTBOX→SENT/FAILED transition
+  /// shows up without the user having to leave and re-open the thread.
+  void _scheduleStatusReload() {
+    for (final ms in const [1500, 4000]) {
+      Future.delayed(Duration(milliseconds: ms), () {
+        if (mounted) _load();
+      });
     }
+  }
+
+  /// Resend a failed message: drop the failed row, then send afresh.
+  Future<void> _retry(ThreadMessage m) async {
+    await NativeBridge.deleteMessage(m.id);
+    final ok = await NativeBridge.sendSms(widget.address, m.body);
+    if (!mounted) return;
+    if (!ok) {
+      _toast(
+        'Couldn\'t send the message.',
+        icon: Icons.error_outline_rounded,
+        error: true,
+      );
+    }
+    await _load();
+    _scheduleStatusReload();
   }
 
   void _toggleMessageSelect(ThreadMessage m) {
@@ -285,8 +306,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
   Future<void> _scheduleMessage() async {
     final text = _input.text.trim();
     if (text.isEmpty) {
-      _toast('Type a message first.',
-          icon: Icons.edit_outlined, error: true);
+      _toast('Type a message first.', icon: Icons.edit_outlined, error: true);
       return;
     }
     final scheduled = await showModalBottomSheet<DateTime>(
@@ -297,12 +317,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
     );
     if (scheduled == null || !mounted) return;
     if (scheduled.isBefore(DateTime.now())) {
-      _toast('Please pick a future time.',
-          icon: Icons.schedule_outlined, error: true);
+      _toast(
+        'Please pick a future time.',
+        icon: Icons.schedule_outlined,
+        error: true,
+      );
       return;
     }
     await NativeBridge.scheduleMessage(
-        widget.address, text, scheduled.millisecondsSinceEpoch);
+      widget.address,
+      text,
+      scheduled.millisecondsSinceEpoch,
+    );
     _input.clear();
     await _load();
     if (mounted) {
@@ -329,29 +355,38 @@ class _ThreadScreenState extends State<ThreadScreen> {
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
               child: Text(
                 'Send options',
-                style: Theme.of(ctx)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
             ListTile(
               leading: const Icon(Icons.send_rounded),
               title: const Text('Send now'),
-              onTap: () { Navigator.pop(ctx); _send(); },
+              onTap: () {
+                Navigator.pop(ctx);
+                _send();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.schedule_outlined),
               title: const Text('Schedule send'),
-              onTap: () { Navigator.pop(ctx); _scheduleMessage(); },
+              onTap: () {
+                Navigator.pop(ctx);
+                _scheduleMessage();
+              },
             ),
             if (_sims.length >= 2) ...[
               const Divider(height: 1, indent: 16, endIndent: 16),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text('Send with SIM',
-                    style: TextStyle(
-                        fontSize: 12, color: scheme.onSurfaceVariant)),
+                child: Text(
+                  'Send with SIM',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
               ),
               ..._sims.map(
                 (s) => ListTile(
@@ -360,19 +395,28 @@ class _ThreadScreenState extends State<ThreadScreen> {
                     backgroundColor: s.subId == _selectedSubId
                         ? AppColors.primary
                         : AppColors.primary.withValues(alpha: 0.14),
-                    child: Text('${s.slot + 1}',
-                        style: TextStyle(
-                            color: s.subId == _selectedSubId
-                                ? Colors.white
-                                : AppColors.primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13)),
+                    child: Text(
+                      '${s.slot + 1}',
+                      style: TextStyle(
+                        color: s.subId == _selectedSubId
+                            ? Colors.white
+                            : AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
                   title: Text(s.label),
-                  subtitle: Text(s.shortLabel,
-                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                  subtitle: Text(
+                    s.shortLabel,
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
                   trailing: s.subId == _selectedSubId
-                      ? const Icon(Icons.check, color: AppColors.primary, size: 18)
+                      ? const Icon(
+                          Icons.check,
+                          color: AppColors.primary,
+                          size: 18,
+                        )
                       : null,
                   onTap: () {
                     // Only switch the active SIM — do NOT send yet.
@@ -476,7 +520,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
                         Text(
                           _displayName,
                           style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w600),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -500,42 +546,59 @@ class _ThreadScreenState extends State<ThreadScreen> {
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                   elevation: 2,
                   onSelected: (v) {
                     switch (v) {
-                      case 'silence': _silenceSender();
-                      case 'pin': _togglePin();
-                      case 'block': _toggleBlock();
-                      case 'read': _markRead();
-                      case 'scheduled': _openScheduled();
+                      case 'silence':
+                        _silenceSender();
+                      case 'pin':
+                        _togglePin();
+                      case 'block':
+                        _toggleBlock();
+                      case 'read':
+                        _markRead();
+                      case 'scheduled':
+                        _openScheduled();
                     }
                   },
                   itemBuilder: (ctx) {
-                    Widget item(IconData ic, String label) => Row(children: [
-                          Icon(ic, size: 20),
-                          const SizedBox(width: 14),
-                          Text(label),
-                        ]);
+                    Widget item(IconData ic, String label) => Row(
+                      children: [
+                        Icon(ic, size: 20),
+                        const SizedBox(width: 14),
+                        Text(label),
+                      ],
+                    );
                     return <PopupMenuEntry<String>>[
                       PopupMenuItem(
                         value: 'silence',
-                        child: item(Icons.notifications_off_outlined,
-                            'Silence sender'),
+                        child: item(
+                          Icons.notifications_off_outlined,
+                          'Silence sender',
+                        ),
                       ),
                       PopupMenuItem(
                         value: 'pin',
-                        child: item(pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                            pinned ? 'Unpin' : 'Pin'),
+                        child: item(
+                          pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                          pinned ? 'Unpin' : 'Pin',
+                        ),
                       ),
                       PopupMenuItem(
                         value: 'block',
-                        child: item(blocked ? Icons.block : Icons.block_outlined,
-                            blocked ? 'Unblock' : 'Block'),
+                        child: item(
+                          blocked ? Icons.block : Icons.block_outlined,
+                          blocked ? 'Unblock' : 'Block',
+                        ),
                       ),
                       PopupMenuItem(
                         value: 'read',
-                        child: item(Icons.mark_email_read_outlined, 'Mark as read'),
+                        child: item(
+                          Icons.mark_email_read_outlined,
+                          'Mark as read',
+                        ),
                       ),
                       PopupMenuItem(
                         value: 'scheduled',
@@ -558,77 +621,87 @@ class _ThreadScreenState extends State<ThreadScreen> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _messages.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.chat_bubble_outline,
-                                  size: 56, color: scheme.outlineVariant),
-                              const SizedBox(height: 12),
-                              Text(
-                                'No messages yet',
-                                style: TextStyle(
-                                  color: scheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text('Say hello below',
-                                  style: TextStyle(
-                                      color: scheme.onSurfaceVariant)),
-                            ],
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.chat_bubble_outline,
+                            size: 56,
+                            color: scheme.outlineVariant,
                           ),
-                        )
-                      : ListView.builder(
-                          controller: _scroll,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 16),
-                          itemCount: _messages.length,
-                          itemBuilder: (_, i) {
-                            final m = _messages[i];
-                            final prev = i > 0 ? _messages[i - 1] : null;
-                            final showDate = prev == null ||
-                                !_sameDay(prev.date, m.date);
-                            final grouped = !showDate &&
-                                prev != null &&
-                                prev.outgoing == m.outgoing;
-                            final selected = _selectedIds.contains(m.id);
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                if (showDate) _DateChip(date: m.date),
-                                GestureDetector(
-                                  onLongPress: () => _toggleMessageSelect(m),
-                                  onTap: _selecting
-                                      ? () => _toggleMessageSelect(m)
-                                      : null,
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 150),
-                                    color: selected
-                                        ? scheme.primary.withValues(alpha: 0.12)
-                                        : Colors.transparent,
-                                    child: Align(
-                                      alignment: m.outgoing
-                                          ? Alignment.centerRight
-                                          : Alignment.centerLeft,
-                                      child: _Bubble(
-                                        message: m,
-                                        tightTop: grouped,
-                                        simTag: _simTag(m),
-                                        selected: selected,
-                                      ),
-                                    ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No messages yet',
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Say hello below',
+                            style: TextStyle(color: scheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 16,
+                      ),
+                      itemCount: _messages.length,
+                      itemBuilder: (_, i) {
+                        final m = _messages[i];
+                        final prev = i > 0 ? _messages[i - 1] : null;
+                        final showDate =
+                            prev == null || !_sameDay(prev.date, m.date);
+                        final grouped =
+                            prev != null &&
+                            !showDate &&
+                            prev.outgoing == m.outgoing;
+                        final selected = _selectedIds.contains(m.id);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (showDate) _DateChip(date: m.date),
+                            GestureDetector(
+                              onLongPress: () => _toggleMessageSelect(m),
+                              onTap: _selecting
+                                  ? () => _toggleMessageSelect(m)
+                                  : null,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
+                                color: selected
+                                    ? scheme.primary.withValues(alpha: 0.12)
+                                    : Colors.transparent,
+                                child: Align(
+                                  alignment: m.outgoing
+                                      ? Alignment.centerRight
+                                      : Alignment.centerLeft,
+                                  child: _Bubble(
+                                    message: m,
+                                    tightTop: grouped,
+                                    simTag: _simTag(m),
+                                    selected: selected,
+                                    onRetry: m.failed ? () => _retry(m) : null,
                                   ),
                                 ),
-                              ],
-                            );
-                          },
-                        ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
             ),
           ),
           if (_scheduled.isNotEmpty)
             _ScheduledSection(
-                scheduled: _scheduled, onCancel: _cancelScheduled),
+              scheduled: _scheduled,
+              onCancel: _cancelScheduled,
+            ),
           _Composer(
             controller: _input,
             sending: _sending,
@@ -667,8 +740,7 @@ class _DateChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Center(
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(20),
@@ -695,12 +767,14 @@ class _Bubble extends StatelessWidget {
     this.tightTop = false,
     this.simTag,
     this.selected = false,
+    this.onRetry,
   });
 
   final ThreadMessage message;
   final bool tightTop;
   final String? simTag;
   final bool selected;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -710,12 +784,12 @@ class _Bubble extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.only(top: tightTop ? 3 : 12),
       child: Column(
-        crossAxisAlignment:
-            out ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: out
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.75,
             ),
@@ -742,14 +816,19 @@ class _Bubble extends StatelessWidget {
           ),
           Padding(
             padding: EdgeInsets.only(
-                top: 3, left: out ? 0 : 6, right: out ? 6 : 0),
+              top: 3,
+              left: out ? 0 : 6,
+              right: out ? 6 : 0,
+            ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   DateFormat('h:mm a').format(message.date),
                   style: TextStyle(
-                      fontSize: 11, color: scheme.onSurfaceVariant),
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
                 if (simTag != null) ...[
                   const SizedBox(width: 5),
@@ -771,9 +850,42 @@ class _Bubble extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (message.sending) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    'Sending…',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
+          // Failed sends are clearly marked and tappable to retry (B4).
+          if (message.failed)
+            GestureDetector(
+              onTap: onRetry,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 3, right: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, size: 13, color: scheme.error),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Not sent · Tap to retry',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.error,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -795,6 +907,7 @@ class _Composer extends StatelessWidget {
   final bool sending;
   final VoidCallback onSend;
   final VoidCallback? onLongPressSend;
+
   /// Short SIM label shown below the send button (e.g. "SIM1"). Null = hidden.
   final String? currentSimLabel;
 
@@ -831,28 +944,34 @@ class _Composer extends StatelessWidget {
                     decoration: InputDecoration(
                       hintText: 'Message…',
                       hintStyle: TextStyle(
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.55)),
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+                      ),
                       filled: false,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(28),
                         borderSide: BorderSide(
-                            color: scheme.outlineVariant, width: 1.2),
+                          color: scheme.outlineVariant,
+                          width: 1.2,
+                        ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(28),
                         borderSide: BorderSide(
-                            color: scheme.outlineVariant
-                                .withValues(alpha: 0.6),
-                            width: 1.2),
+                          color: scheme.outlineVariant.withValues(alpha: 0.6),
+                          width: 1.2,
+                        ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(28),
                         borderSide: BorderSide(
-                            color: scheme.outlineVariant.withValues(alpha: 0.6),
-                            width: 1.2),
+                          color: scheme.outlineVariant.withValues(alpha: 0.6),
+                          width: 1.2,
+                        ),
                       ),
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                   ),
                 ),
@@ -922,8 +1041,7 @@ class _Composer extends StatelessWidget {
 // ── Scheduled messages section ─────────────────────────────────────────────────
 
 class _ScheduledSection extends StatelessWidget {
-  const _ScheduledSection(
-      {required this.scheduled, required this.onCancel});
+  const _ScheduledSection({required this.scheduled, required this.onCancel});
 
   final List<ScheduledMessage> scheduled;
   final void Function(ScheduledMessage) onCancel;
@@ -940,8 +1058,11 @@ class _ScheduledSection extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
             child: Row(
               children: [
-                Icon(Icons.schedule_outlined,
-                    size: 14, color: scheme.onSurfaceVariant),
+                Icon(
+                  Icons.schedule_outlined,
+                  size: 14,
+                  color: scheme.onSurfaceVariant,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   'Scheduled',
@@ -958,8 +1079,10 @@ class _ScheduledSection extends StatelessWidget {
             (m) => InkWell(
               onTap: () => onCancel(m),
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
                     Expanded(
@@ -968,14 +1091,18 @@ class _ScheduledSection extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            fontSize: 13, color: scheme.onSurfaceVariant),
+                          fontSize: 13,
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Text(
                       DateFormat('MMM d, h:mm a').format(m.scheduledTime),
                       style: TextStyle(
-                          fontSize: 11, color: scheme.onSurfaceVariant),
+                        fontSize: 11,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(width: 6),
                     Icon(Icons.close, size: 16, color: scheme.onSurfaceVariant),
@@ -1059,7 +1186,8 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
         // Drag handle
         Container(
           margin: const EdgeInsets.only(top: 10, bottom: 4),
-          width: 36, height: 4,
+          width: 36,
+          height: 4,
           decoration: BoxDecoration(
             color: scheme.outlineVariant,
             borderRadius: BorderRadius.circular(2),
@@ -1071,10 +1199,9 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
             alignment: Alignment.centerLeft,
             child: Text(
               'Schedule message',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
         ),
@@ -1100,7 +1227,9 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
                         _dayLabel(_days[i]),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.w400),
+                          fontSize: 17,
+                          fontWeight: FontWeight.w400,
+                        ),
                       ),
                     ),
                   ),
@@ -1116,7 +1245,9 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
                         '$i'.padLeft(2, '0'),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.w400),
+                          fontSize: 17,
+                          fontWeight: FontWeight.w400,
+                        ),
                       ),
                     ),
                   ),
@@ -1132,7 +1263,9 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
                         '$i'.padLeft(2, '0'),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.w400),
+                          fontSize: 17,
+                          fontWeight: FontWeight.w400,
+                        ),
                       ),
                     ),
                   ),
@@ -1198,23 +1331,32 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
         // Confirm button
         Padding(
           padding: EdgeInsets.fromLTRB(
-              20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+            20,
+            20,
+            20,
+            20 + MediaQuery.of(context).viewInsets.bottom,
+          ),
           child: SizedBox(
             width: double.infinity,
             child: FilledButton.tonal(
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(32)),
+                  borderRadius: BorderRadius.circular(32),
+                ),
               ),
-              onPressed: isFuture ? () => Navigator.pop(context, _combined) : null,
+              onPressed: isFuture
+                  ? () => Navigator.pop(context, _combined)
+                  : null,
               child: Text(
                 isFuture
                     ? 'Schedule for ${DateFormat('MMM d').format(_combined)}'
-                      ' at ${DateFormat('HH:mm').format(_combined)}'
+                          ' at ${DateFormat('HH:mm').format(_combined)}'
                     : 'Pick a future time',
                 style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w600),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),

@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 
 import 'models.dart';
@@ -12,10 +10,9 @@ class NativeBridge {
 
   /// Stream of incoming non-silenced SMS events while the app is in the
   /// foreground. Each event is a map with "sender" and "body" keys.
-  static Stream<Map<String, dynamic>> get smsEvents =>
-      _events.receiveBroadcastStream().map(
-            (e) => Map<String, dynamic>.from(e as Map),
-          );
+  static Stream<Map<String, dynamic>> get smsEvents => _events
+      .receiveBroadcastStream()
+      .map((e) => Map<String, dynamic>.from(e as Map));
 
   /// Is this app currently Android's default SMS app? Filtering only works if so.
   static Future<bool> isDefaultSmsApp() async {
@@ -30,7 +27,9 @@ class NativeBridge {
 
   /// Built-in defaults (with on/off state) + user-added silenced entries.
   static Future<SilenceList> getSilenceList() async {
-    final res = await _channel.invokeMapMethod<String, dynamic>('getSilenceList');
+    final res = await _channel.invokeMapMethod<String, dynamic>(
+      'getSilenceList',
+    );
     if (res == null) return const SilenceList(defaults: [], custom: []);
     final defaultsRaw = (res['defaults'] as List?) ?? const [];
     final customRaw = (res['custom'] as List?) ?? const [];
@@ -44,10 +43,10 @@ class NativeBridge {
 
   /// Toggle a built-in default sender on (silenced) or off (rings).
   static Future<void> setDefaultSilenced(String address, bool silenced) {
-    return _channel.invokeMethod<void>(
-      'setDefaultSilenced',
-      {'address': address, 'silenced': silenced},
-    );
+    return _channel.invokeMethod<void>('setDefaultSilenced', {
+      'address': address,
+      'silenced': silenced,
+    });
   }
 
   static Future<void> addCustom(String address) {
@@ -56,14 +55,6 @@ class NativeBridge {
 
   static Future<void> removeCustom(String address) {
     return _channel.invokeMethod<void>('removeCustom', {'address': address});
-  }
-
-  static Future<List<SmsMessage>> getMessages() async {
-    final result = await _channel.invokeListMethod<dynamic>('getMessages');
-    if (result == null) return <SmsMessage>[];
-    return result
-        .map((e) => SmsMessage.fromMap(Map<String, dynamic>.from(e as Map)))
-        .toList();
   }
 
   /// One entry per conversation (sender), newest first.
@@ -77,20 +68,25 @@ class NativeBridge {
 
   /// All messages with one address, oldest first.
   static Future<List<ThreadMessage>> getThread(String address) async {
-    final raw =
-        await _channel.invokeListMethod<dynamic>('getThread', {'address': address});
+    final raw = await _channel.invokeListMethod<dynamic>('getThread', {
+      'address': address,
+    });
     if (raw == null) return <ThreadMessage>[];
     return raw
         .map((e) => ThreadMessage.fromMap(Map<String, dynamic>.from(e as Map)))
         .toList();
   }
 
-  static Future<bool> sendSms(String address, String body,
-      {int subId = -1}) async {
-    final ok = await _channel.invokeMethod<bool>(
-      'sendSms',
-      {'address': address, 'body': body, 'subId': subId},
-    );
+  static Future<bool> sendSms(
+    String address,
+    String body, {
+    int subId = -1,
+  }) async {
+    final ok = await _channel.invokeMethod<bool>('sendSms', {
+      'address': address,
+      'body': body,
+      'subId': subId,
+    });
     return ok ?? false;
   }
 
@@ -109,7 +105,9 @@ class NativeBridge {
 
   /// Saved contact name for a number, or null if not in Contacts.
   static Future<String?> getContactName(String address) {
-    return _channel.invokeMethod<String>('getContactName', {'address': address});
+    return _channel.invokeMethod<String>('getContactName', {
+      'address': address,
+    });
   }
 
   static Future<String> getThemeMode() async {
@@ -121,8 +119,9 @@ class NativeBridge {
   }
 
   static Future<bool> deleteThread(String address) async {
-    return (await _channel
-            .invokeMethod<bool>('deleteThread', {'address': address})) ??
+    return (await _channel.invokeMethod<bool>('deleteThread', {
+          'address': address,
+        })) ??
         false;
   }
 
@@ -144,8 +143,9 @@ class NativeBridge {
   }
 
   static Future<String> createFolder(String name) async {
-    return (await _channel
-            .invokeMethod<String>('createFolder', {'name': name})) ??
+    return (await _channel.invokeMethod<String>('createFolder', {
+          'name': name,
+        })) ??
         '';
   }
 
@@ -153,10 +153,11 @@ class NativeBridge {
     return _channel.invokeMethod<void>('deleteFolder', {'id': id});
   }
 
-  static Future<void> addToFolder(
-      String folderId, List<String> addresses) {
-    return _channel.invokeMethod<void>(
-        'addToFolder', {'folderId': folderId, 'addresses': addresses});
+  static Future<void> addToFolder(String folderId, List<String> addresses) {
+    return _channel.invokeMethod<void>('addToFolder', {
+      'folderId': folderId,
+      'addresses': addresses,
+    });
   }
 
   // ── Pinned ────────────────────────────────────────────────────────────────
@@ -198,11 +199,15 @@ class NativeBridge {
   // ── Scheduled messages ────────────────────────────────────────────────────
 
   static Future<String> scheduleMessage(
-      String address, String body, int timeMillis) async {
-    return (await _channel.invokeMethod<String>(
-          'scheduleMessage',
-          {'address': address, 'body': body, 'timeMillis': timeMillis},
-        )) ??
+    String address,
+    String body,
+    int timeMillis,
+  ) async {
+    return (await _channel.invokeMethod<String>('scheduleMessage', {
+          'address': address,
+          'body': body,
+          'timeMillis': timeMillis,
+        })) ??
         '';
   }
 
@@ -210,13 +215,16 @@ class NativeBridge {
       _channel.invokeMethod<void>('cancelScheduledMessage', {'msgId': msgId});
 
   static Future<List<ScheduledMessage>> getScheduledMessages(
-      String address) async {
-    final raw =
-        await _channel.invokeListMethod<dynamic>('getScheduledMessages');
+    String address,
+  ) async {
+    final raw = await _channel.invokeListMethod<dynamic>(
+      'getScheduledMessages',
+    );
     if (raw == null) return [];
     return raw
-        .map((e) =>
-            ScheduledMessage.fromMap(Map<String, dynamic>.from(e as Map)))
+        .map(
+          (e) => ScheduledMessage.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
         .where((m) => m.address == address || address.isEmpty)
         .toList();
   }
@@ -237,7 +245,9 @@ class NativeBridge {
 
   static Future<Uint8List?> getContactPhotoBytes(String photoUri) async {
     final bytes = await _channel.invokeMethod<Uint8List>(
-        'getContactPhotoBytes', {'photoUri': photoUri});
+      'getContactPhotoBytes',
+      {'photoUri': photoUri},
+    );
     return bytes;
   }
 

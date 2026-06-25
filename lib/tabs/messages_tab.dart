@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../app_theme.dart';
+import '../identity.dart';
 import '../models.dart';
 import '../screens/thread_screen.dart';
 
@@ -32,9 +33,9 @@ class _MessagesTabState extends State<MessagesTab>
   }
 
   Future<void> _open(Conversation c) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ThreadScreen(address: c.address)),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => ThreadScreen(address: c.address)));
     if (mounted) context.read<AppState>().loadConversations();
   }
 
@@ -205,8 +206,8 @@ class _MessagesTabState extends State<MessagesTab>
                 child: Text(
                   'Add to folder',
                   style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               ...folders.map(
@@ -238,9 +239,10 @@ class _MessagesTabState extends State<MessagesTab>
     }
 
     if (folderId != null && mounted) {
-      await context
-          .read<AppState>()
-          .addConversationsToFolder(folderId, _selected.toList());
+      await context.read<AppState>().addConversationsToFolder(
+        folderId,
+        _selected.toList(),
+      );
       if (mounted) setState(_selected.clear);
     }
   }
@@ -266,10 +268,14 @@ class _MessagesTabState extends State<MessagesTab>
     List<Conversation> list;
     final activeFolderId = state.activeFolderId;
     if (activeFolderId != null) {
-      final folder = state.folders.where((f) => f.id == activeFolderId).firstOrNull;
+      final folder = state.folders
+          .where((f) => f.id == activeFolderId)
+          .firstOrNull;
       if (folder != null) {
-        final addrSet = folder.addresses.toSet();
-        list = all.where((c) => addrSet.contains(c.address)).toList();
+        final addrSet = folder.addresses.map(normalizeAddress).toSet();
+        list = all
+            .where((c) => addrSet.contains(normalizeAddress(c.address)))
+            .toList();
       } else {
         list = all;
       }
@@ -282,11 +288,17 @@ class _MessagesTabState extends State<MessagesTab>
     }
 
     // Sort: pinned first → with draft second → by date.
-    // Use live pin state (state.isPinned) so re-ordering is instant, before
-    // the native conversation list reloads.
-    list = [...list]..sort((a, b) {
-        final aPin = state.isPinned(a.address);
-        final bPin = state.isPinned(b.address);
+    // Use live pin state so re-ordering is instant, before the native
+    // conversation list reloads. Normalize the pinned addresses once here
+    // instead of inside the comparator, where isPinned() would re-normalize
+    // every pinned entry on each of the O(n log n) comparisons.
+    final pinnedNorm = {
+      for (final p in state.pinnedAddresses) normalizeAddress(p),
+    };
+    list = [...list]
+      ..sort((a, b) {
+        final aPin = pinnedNorm.contains(normalizeAddress(a.address));
+        final bPin = pinnedNorm.contains(normalizeAddress(b.address));
         if (aPin != bPin) return aPin ? -1 : 1;
         final aDraft = state.getDraft(a.address).isNotEmpty;
         final bDraft = state.getDraft(b.address).isNotEmpty;
@@ -311,40 +323,40 @@ class _MessagesTabState extends State<MessagesTab>
             child: (state.loadingConversations && all.isEmpty)
                 ? const Center(child: CircularProgressIndicator())
                 : list.isEmpty
-                    ? ListView(
-                        children: const [
-                          SizedBox(height: 120),
-                          _CenteredPrompt(
-                            icon: Icons.inbox_outlined,
-                            title: 'Nothing here',
-                            message: 'No conversations match this filter yet.',
-                          ),
-                        ],
-                      )
-                    : ListView.separated(
-                        itemCount: list.length,
-                        separatorBuilder: (_, __) => Divider(
-                          height: 1,
-                          indent: 84,
-                          endIndent: 16,
-                          color: scheme.outlineVariant.withValues(alpha: 0.5),
-                        ),
-                        itemBuilder: (_, i) {
-                          final c = list[i];
-                          final photo = state.contactPhotos[c.address];
-                          final draft = state.getDraft(c.address);
-                          return _ConversationTile(
-                            convo: c,
-                            selecting: _selecting,
-                            selected: _selected.contains(c.address),
-                            pinned: state.isPinned(c.address),
-                            contactPhoto: photo,
-                            draft: draft,
-                            onTap: () => _selecting ? _toggle(c) : _open(c),
-                            onLongPress: () => _toggle(c),
-                          );
-                        },
+                ? ListView(
+                    children: const [
+                      SizedBox(height: 120),
+                      _CenteredPrompt(
+                        icon: Icons.inbox_outlined,
+                        title: 'Nothing here',
+                        message: 'No conversations match this filter yet.',
                       ),
+                    ],
+                  )
+                : ListView.separated(
+                    itemCount: list.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      indent: 84,
+                      endIndent: 16,
+                      color: scheme.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                    itemBuilder: (_, i) {
+                      final c = list[i];
+                      final photo = state.contactPhotos[c.address];
+                      final draft = state.getDraft(c.address);
+                      return _ConversationTile(
+                        convo: c,
+                        selecting: _selecting,
+                        selected: _selected.contains(c.address),
+                        pinned: state.isPinned(c.address),
+                        contactPhoto: photo,
+                        draft: draft,
+                        onTap: () => _selecting ? _toggle(c) : _open(c),
+                        onLongPress: () => _toggle(c),
+                      );
+                    },
+                  ),
           ),
         ),
       ],
@@ -363,8 +375,10 @@ class _MessagesTabState extends State<MessagesTab>
           asset,
           width: 22,
           height: 22,
-          colorFilter:
-              ColorFilter.mode(scheme.onSurfaceVariant, BlendMode.srcIn),
+          colorFilter: ColorFilter.mode(
+            scheme.onSurfaceVariant,
+            BlendMode.srcIn,
+          ),
         ),
       );
     }
@@ -387,19 +401,30 @@ class _MessagesTabState extends State<MessagesTab>
           IconButton(
             icon: const Icon(Icons.select_all),
             tooltip: 'Select all',
-            onPressed: () => setState(
-              () => _selected.addAll(list.map((c) => c.address)),
-            ),
+            onPressed: () =>
+                setState(() => _selected.addAll(list.map((c) => c.address))),
           ),
-          svgBtn('assets/icons/push-pin.svg',
-              anyUnpinned ? 'Pin' : 'Unpin', _pinSelected),
+          svgBtn(
+            'assets/icons/push-pin.svg',
+            anyUnpinned ? 'Pin' : 'Unpin',
+            _pinSelected,
+          ),
           svgBtn('assets/icons/prohibit.svg', 'Block', _blockSelected),
-          svgBtn('assets/icons/folder-simple.svg', 'Add to folder',
-              _addSelectedToFolder),
-          svgBtn('assets/icons/bell-simple-slash.svg', 'Silence',
-              _silenceSelected),
-          svgBtn('assets/icons/envelope-open.svg', 'Mark as read',
-              _markSelectedRead),
+          svgBtn(
+            'assets/icons/folder-simple.svg',
+            'Add to folder',
+            _addSelectedToFolder,
+          ),
+          svgBtn(
+            'assets/icons/bell-simple-slash.svg',
+            'Silence',
+            _silenceSelected,
+          ),
+          svgBtn(
+            'assets/icons/envelope-open.svg',
+            'Mark as read',
+            _markSelectedRead,
+          ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             tooltip: 'Delete',
@@ -431,9 +456,9 @@ class _FolderTabBar extends StatelessWidget {
   final VoidCallback onCreateFolder;
 
   int _unread(Folder f) {
-    final addrs = f.addresses.toSet();
+    final addrs = f.addresses.map(normalizeAddress).toSet();
     return conversations
-        .where((c) => addrs.contains(c.address))
+        .where((c) => addrs.contains(normalizeAddress(c.address)))
         .fold(0, (s, c) => s + c.unread);
   }
 
@@ -475,8 +500,7 @@ class _FolderTabBar extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
-                  border: Border.all(
-                      color: scheme.outlineVariant, width: 1),
+                  border: Border.all(color: scheme.outlineVariant, width: 1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -487,7 +511,9 @@ class _FolderTabBar extends StatelessWidget {
                     Text(
                       'New',
                       style: TextStyle(
-                          fontSize: 13, color: scheme.onSurfaceVariant),
+                        fontSize: 13,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -640,8 +666,11 @@ class _ConversationTile extends StatelessWidget {
                           border: Border.all(color: scheme.surface, width: 2),
                         ),
                         padding: const EdgeInsets.all(2),
-                        child: const Icon(Icons.check,
-                            size: 13, color: Colors.white),
+                        child: const Icon(
+                          Icons.check,
+                          size: 13,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                 ],
@@ -657,8 +686,11 @@ class _ConversationTile extends StatelessWidget {
                       if (pinned)
                         Padding(
                           padding: const EdgeInsets.only(right: 4),
-                          child: Icon(Icons.push_pin,
-                              size: 13, color: AppColors.primary),
+                          child: Icon(
+                            Icons.push_pin,
+                            size: 13,
+                            color: AppColors.primary,
+                          ),
                         ),
                       Expanded(
                         child: Text(
@@ -668,8 +700,9 @@ class _ConversationTile extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 15,
                             color: scheme.onSurfaceVariant,
-                            fontWeight:
-                                unread ? FontWeight.w700 : FontWeight.w600,
+                            fontWeight: unread
+                                ? FontWeight.w700
+                                : FontWeight.w600,
                           ),
                         ),
                       ),
@@ -679,8 +712,9 @@ class _ConversationTile extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 12,
                           color: scheme.onSurfaceVariant,
-                          fontWeight:
-                              unread ? FontWeight.w600 : FontWeight.normal,
+                          fontWeight: unread
+                              ? FontWeight.w600
+                              : FontWeight.normal,
                         ),
                       ),
                     ],
@@ -689,8 +723,7 @@ class _ConversationTile extends StatelessWidget {
                   Row(
                     children: [
                       if (blocked) ...[
-                        Icon(Icons.block,
-                            size: 14, color: scheme.error),
+                        Icon(Icons.block, size: 14, color: scheme.error),
                         const SizedBox(width: 4),
                       ] else if (draft.isNotEmpty) ...[
                         Text(
@@ -702,8 +735,11 @@ class _ConversationTile extends StatelessWidget {
                           ),
                         ),
                       ] else if (silenced) ...[
-                        Icon(Icons.notifications_off,
-                            size: 14, color: scheme.onSurfaceVariant),
+                        Icon(
+                          Icons.notifications_off,
+                          size: 14,
+                          color: scheme.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 4),
                       ],
                       Expanded(
@@ -711,8 +747,8 @@ class _ConversationTile extends StatelessWidget {
                           blocked
                               ? 'Blocked'
                               : draft.isNotEmpty
-                                  ? draft.replaceAll('\n', ' ')
-                                  : convo.lastBody.replaceAll('\n', ' '),
+                              ? draft.replaceAll('\n', ' ')
+                              : convo.lastBody.replaceAll('\n', ' '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -721,10 +757,10 @@ class _ConversationTile extends StatelessWidget {
                             color: blocked
                                 ? scheme.error
                                 : draft.isNotEmpty
-                                    ? scheme.onSurfaceVariant
-                                    : unread
-                                        ? scheme.onSurface
-                                        : scheme.onSurfaceVariant,
+                                ? scheme.onSurfaceVariant
+                                : unread
+                                ? scheme.onSurface
+                                : scheme.onSurfaceVariant,
                             fontWeight: unread && draft.isEmpty
                                 ? FontWeight.w500
                                 : FontWeight.normal,
@@ -735,10 +771,13 @@ class _ConversationTile extends StatelessWidget {
                         const SizedBox(width: 10),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color:
-                                scheme.onSurfaceVariant.withValues(alpha: 0.2),
+                            color: scheme.onSurfaceVariant.withValues(
+                              alpha: 0.2,
+                            ),
                             borderRadius: BorderRadius.circular(7),
                           ),
                           child: Text(
