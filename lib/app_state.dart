@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'identity.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 
@@ -102,7 +103,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> addConversationsToFolder(
-      String folderId, List<String> addresses) async {
+    String folderId,
+    List<String> addresses,
+  ) async {
     await NativeBridge.addToFolder(folderId, addresses);
     await loadFolders();
   }
@@ -114,7 +117,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool isPinned(String address) => pinnedAddresses.contains(address);
+  // Normalize-aware so a contact stays pinned even if its number format shifts
+  // between +251…, 09… and 9… (B11).
+  bool isPinned(String address) =>
+      pinnedAddresses.any((p) => sameAddress(p, address));
 
   Future<void> addPin(String address) async {
     await NativeBridge.addPin(address);
@@ -143,7 +149,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool isBlocked(String address) => blockedAddresses.contains(address);
+  bool isBlocked(String address) =>
+      blockedAddresses.any((b) => sameAddress(b, address));
 
   Future<void> addBlocked(String address) async {
     await NativeBridge.addBlocked(address);
@@ -190,16 +197,16 @@ class AppState extends ChangeNotifier {
   }
 
   static ThemeMode _parseThemeMode(String s) => switch (s) {
-        'light' => ThemeMode.light,
-        'dark' => ThemeMode.dark,
-        _ => ThemeMode.system,
-      };
+    'light' => ThemeMode.light,
+    'dark' => ThemeMode.dark,
+    _ => ThemeMode.system,
+  };
 
   static String _themeModeName(ThemeMode m) => switch (m) {
-        ThemeMode.light => 'light',
-        ThemeMode.dark => 'dark',
-        ThemeMode.system => 'system',
-      };
+    ThemeMode.light => 'light',
+    ThemeMode.dark => 'dark',
+    ThemeMode.system => 'system',
+  };
 
   Future<void> refreshOnResume() async {
     await refreshStatus();

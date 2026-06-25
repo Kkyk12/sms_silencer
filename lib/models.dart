@@ -7,39 +7,12 @@ class Folder {
   const Folder({required this.id, required this.name, required this.addresses});
 
   factory Folder.fromMap(Map<String, dynamic> m) => Folder(
-        id: m['id'] as String,
-        name: m['name'] as String,
-        addresses:
-            ((m['addresses'] as List?) ?? []).map((e) => e.toString()).toList(),
-      );
-}
-
-/// A single received SMS, as read from the Android inbox via the native bridge.
-class SmsMessage {
-  final String address;
-  final String body;
-  final DateTime date;
-
-  /// Whether this sender is currently silenced (no sound). Otherwise it rings.
-  final bool silenced;
-
-  SmsMessage({
-    required this.address,
-    required this.body,
-    required this.date,
-    required this.silenced,
-  });
-
-  factory SmsMessage.fromMap(Map<String, dynamic> map) {
-    final millis = (map['date'] as num?)?.toInt() ?? 0;
-    final addr = (map['address'] as String?)?.trim();
-    return SmsMessage(
-      address: (addr != null && addr.isNotEmpty) ? addr : 'Unknown',
-      body: (map['body'] as String?) ?? '',
-      date: DateTime.fromMillisecondsSinceEpoch(millis),
-      silenced: (map['silenced'] as bool?) ?? false,
-    );
-  }
+    id: m['id'] as String,
+    name: m['name'] as String,
+    addresses: ((m['addresses'] as List?) ?? [])
+        .map((e) => e.toString())
+        .toList(),
+  );
 }
 
 /// A built-in (default) sender that can be silenced or allowed to ring.
@@ -50,9 +23,9 @@ class SilenceEntry {
   const SilenceEntry({required this.address, required this.silenced});
 
   factory SilenceEntry.fromMap(Map<String, dynamic> map) => SilenceEntry(
-        address: (map['address'] as String?) ?? '',
-        silenced: (map['silenced'] as bool?) ?? true,
-      );
+    address: (map['address'] as String?) ?? '',
+    silenced: (map['silenced'] as bool?) ?? true,
+  );
 
   SilenceEntry copyWith({bool? silenced}) =>
       SilenceEntry(address: address, silenced: silenced ?? this.silenced);
@@ -103,7 +76,9 @@ class Conversation {
       address: (addr != null && addr.isNotEmpty) ? addr : 'Unknown',
       name: (m['name'] as String?),
       lastBody: (m['body'] as String?) ?? '',
-      date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num?)?.toInt() ?? 0),
+      date: DateTime.fromMillisecondsSinceEpoch(
+        (m['date'] as num?)?.toInt() ?? 0,
+      ),
       count: (m['count'] as num?)?.toInt() ?? 0,
       unread: (m['unread'] as num?)?.toInt() ?? 0,
       silenced: (m['silenced'] as bool?) ?? false,
@@ -129,12 +104,13 @@ class ScheduledMessage {
   });
 
   factory ScheduledMessage.fromMap(Map<String, dynamic> m) => ScheduledMessage(
-        id: (m['id'] as String?) ?? '',
-        address: (m['address'] as String?) ?? '',
-        body: (m['body'] as String?) ?? '',
-        scheduledTime: DateTime.fromMillisecondsSinceEpoch(
-            (m['timeMillis'] as num?)?.toInt() ?? 0),
-      );
+    id: (m['id'] as String?) ?? '',
+    address: (m['address'] as String?) ?? '',
+    body: (m['body'] as String?) ?? '',
+    scheduledTime: DateTime.fromMillisecondsSinceEpoch(
+      (m['timeMillis'] as num?)?.toInt() ?? 0,
+    ),
+  );
 }
 
 /// A phone contact (from the device address book), used in compose search.
@@ -143,20 +119,19 @@ class ContactEntry {
   final String number;
   final String? photoUri;
 
-  const ContactEntry({
-    required this.name,
-    required this.number,
-    this.photoUri,
-  });
+  const ContactEntry({required this.name, required this.number, this.photoUri});
 
   String get displayName => name.trim().isNotEmpty ? name.trim() : number;
 
   factory ContactEntry.fromMap(Map<String, dynamic> m) => ContactEntry(
-        name: (m['name'] as String?) ?? '',
-        number: (m['number'] as String?) ?? '',
-        photoUri: m['photoUri'] as String?,
-      );
+    name: (m['name'] as String?) ?? '',
+    number: (m['number'] as String?) ?? '',
+    photoUri: m['photoUri'] as String?,
+  );
 }
+
+/// Delivery status of an outgoing message (incoming messages are always sent).
+enum SendStatus { sent, sending, failed }
 
 /// A single message inside a thread (sent or received).
 class ThreadMessage {
@@ -168,21 +143,35 @@ class ThreadMessage {
   /// Subscription (SIM) id this message was sent/received on; -1 if unknown.
   final int subId;
 
+  /// For outgoing messages: whether it sent, is still sending, or failed.
+  final SendStatus status;
+
   ThreadMessage({
     required this.id,
     required this.body,
     required this.date,
     required this.outgoing,
     this.subId = -1,
+    this.status = SendStatus.sent,
   });
 
+  bool get failed => outgoing && status == SendStatus.failed;
+  bool get sending => outgoing && status == SendStatus.sending;
+
   factory ThreadMessage.fromMap(Map<String, dynamic> m) => ThreadMessage(
-        id: (m['id'] as num?)?.toInt() ?? 0,
-        body: (m['body'] as String?) ?? '',
-        date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num?)?.toInt() ?? 0),
-        outgoing: (m['outgoing'] as bool?) ?? false,
-        subId: (m['subId'] as num?)?.toInt() ?? -1,
-      );
+    id: (m['id'] as num?)?.toInt() ?? 0,
+    body: (m['body'] as String?) ?? '',
+    date: DateTime.fromMillisecondsSinceEpoch(
+      (m['date'] as num?)?.toInt() ?? 0,
+    ),
+    outgoing: (m['outgoing'] as bool?) ?? false,
+    subId: (m['subId'] as num?)?.toInt() ?? -1,
+    status: switch (m['status'] as String?) {
+      'failed' => SendStatus.failed,
+      'sending' => SendStatus.sending,
+      _ => SendStatus.sent,
+    },
+  );
 }
 
 /// An active SIM card.
@@ -197,8 +186,8 @@ class SimInfo {
   String get shortLabel => 'SIM${slot + 1}';
 
   factory SimInfo.fromMap(Map<String, dynamic> m) => SimInfo(
-        subId: (m['subId'] as num?)?.toInt() ?? -1,
-        slot: (m['slot'] as num?)?.toInt() ?? 0,
-        label: (m['label'] as String?) ?? 'SIM',
-      );
+    subId: (m['subId'] as num?)?.toInt() ?? -1,
+    slot: (m['slot'] as num?)?.toInt() ?? 0,
+    label: (m['label'] as String?) ?? 'SIM',
+  );
 }

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../app_theme.dart';
+import '../identity.dart';
 import '../models.dart';
 import '../native_bridge.dart';
 import 'thread_screen.dart';
@@ -58,21 +59,11 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
 
   static String _formatDate(DateTime date) {
     final now = DateTime.now();
-    final sameDay = now.year == date.year &&
-        now.month == date.month &&
-        now.day == date.day;
+    final sameDay =
+        now.year == date.year && now.month == date.month && now.day == date.day;
     return sameDay
         ? DateFormat('h:mm a').format(date)
         : DateFormat('MMM d').format(date);
-  }
-
-  /// Conversation-key normalisation matching the native side (last 10 digits).
-  static String _convKey(String address) {
-    final digits = address.replaceAll(RegExp(r'\D'), '');
-    if (digits.length >= 7) {
-      return digits.length <= 10 ? digits : digits.substring(digits.length - 10);
-    }
-    return address.trim().toLowerCase();
   }
 
   bool get _looksLikeNumber =>
@@ -94,9 +85,9 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
           }).toList();
 
     // Phone contacts that don't already have a conversation thread.
-    final convoKeys = {for (final c in all) _convKey(c.address)};
+    final convoKeys = {for (final c in all) normalizeAddress(c.address)};
     final contactMatches = _contacts.where((ct) {
-      if (convoKeys.contains(_convKey(ct.number))) return false;
+      if (convoKeys.contains(normalizeAddress(ct.number))) return false;
       if (_query.isEmpty) return true;
       return ct.name.toLowerCase().contains(q) ||
           ct.number.toLowerCase().contains(q);
@@ -153,8 +144,11 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
             ListTile(
               leading: CircleAvatar(
                 backgroundColor: AppColors.primary.withValues(alpha: 0.12),
-                child: const Icon(Icons.dialpad,
-                    color: AppColors.primary, size: 20),
+                child: const Icon(
+                  Icons.dialpad,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
               ),
               title: Text(
                 _query,
@@ -174,8 +168,11 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
                         if (_loadingContacts) ...[
                           const CircularProgressIndicator(),
                         ] else ...[
-                          Icon(Icons.search_off,
-                              size: 48, color: scheme.outlineVariant),
+                          Icon(
+                            Icons.search_off,
+                            size: 48,
+                            color: scheme.outlineVariant,
+                          ),
                           const SizedBox(height: 12),
                           Text(
                             'No matches found',
@@ -194,9 +191,7 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
                           child: Text(
                             row,
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium
+                            style: Theme.of(context).textTheme.labelMedium
                                 ?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                   letterSpacing: 0.4,

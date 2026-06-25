@@ -23,7 +23,10 @@
         android:label="SMS Guard"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher">
+        android:roundIcon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
 
         <activity
             android:name=".MainActivity"
@@ -100,6 +103,11 @@
         <!-- Fires scheduled messages when their AlarmManager alarm triggers -->
         <receiver
             android:name=".ScheduleReceiver"
+            android:exported="false"/>
+
+        <!-- Receives outgoing-SMS send results to flip rows to SENT/FAILED -->
+        <receiver
+            android:name=".SendStatusReceiver"
             android:exported="false"/>
 
         <!-- Re-schedules pending alarms after device reboot -->

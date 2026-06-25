@@ -19,14 +19,18 @@ class StatusTab extends StatelessWidget {
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            color: state.isReady ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+            color: state.isReady
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHighest,
           ),
           child: Row(
             children: [
               Icon(
                 state.isReady ? Icons.verified_user : Icons.gpp_maybe,
                 size: 44,
-                color: state.isReady ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
+                color: state.isReady
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurfaceVariant,
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -36,16 +40,16 @@ class StatusTab extends StatelessWidget {
                     Text(
                       state.isReady ? 'Protection is on' : 'Protection is off',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: state.isReady
-                                ? scheme.onPrimaryContainer
-                                : scheme.onSurface,
-                          ),
+                        color: state.isReady
+                            ? scheme.onPrimaryContainer
+                            : scheme.onSurface,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       state.isReady
                           ? '${state.activeSilencedCount} senders silenced. '
-                              'Everyone else rings.'
+                                'Everyone else rings.'
                           : 'Complete the steps below to start filtering.',
                       style: TextStyle(
                         color: state.isReady
@@ -121,16 +125,18 @@ class StatusTab extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.info_outline,
-                        size: 18, color: scheme.onSurfaceVariant),
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         "Phone won't let you set it as default?",
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
@@ -142,10 +148,9 @@ class StatusTab extends StatelessWidget {
                   '1. Open app settings below\n'
                   '2. Tap ⋮ (top-right) → "Allow restricted settings"\n'
                   '3. Come back and tap "Set" again',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
@@ -183,7 +188,8 @@ class StatusTab extends StatelessWidget {
         ),
         const _Step(
           number: '2',
-          text: 'If the sender is on your silenced list, the message is saved '
+          text:
+              'If the sender is on your silenced list, the message is saved '
               'quietly — no sound, no vibration.',
         ),
         const _Step(
@@ -201,7 +207,8 @@ class StatusTab extends StatelessWidget {
               _PrivacyPoint(
                 icon: Icons.lock_outline,
                 title: 'Everything stays on your phone',
-                body: 'The app has no Internet access (check Android’s app '
+                body:
+                    'The app has no Internet access (check Android’s app '
                     'permissions to confirm), so your messages and contacts '
                     'can’t be sent anywhere. No servers, accounts, ads or '
                     'analytics.',
@@ -210,14 +217,16 @@ class StatusTab extends StatelessWidget {
               _PrivacyPoint(
                 icon: Icons.visibility_outlined,
                 title: 'Read only to filter',
-                body: 'Texts are read for one reason: to decide whether each '
+                body:
+                    'Texts are read for one reason: to decide whether each '
                     'one should ring or stay silent, and to show them in this app.',
               ),
               Divider(height: 1),
               _PrivacyPoint(
                 icon: Icons.center_focus_strong_outlined,
                 title: 'One job, done well',
-                body: 'SMS Guard silences the senders you choose — nothing '
+                body:
+                    'SMS Guard silences the senders you choose — nothing '
                     'more. Your silence list is stored only on this device.',
               ),
             ],
@@ -227,10 +236,9 @@ class StatusTab extends StatelessWidget {
         Text(
           'SMS Guard must remain your default messaging app for filtering to '
           'work. You can switch back any time in Android settings.',
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
-              ?.copyWith(color: scheme.onSurfaceVariant),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
     );
@@ -265,8 +273,11 @@ class _StatusTile extends StatelessWidget {
       trailing: ok
           ? null
           : (onAction != null
-              ? FilledButton.tonal(onPressed: onAction, child: Text(actionLabel))
-              : null),
+                ? FilledButton.tonal(
+                    onPressed: onAction,
+                    child: Text(actionLabel),
+                  )
+                : null),
     );
   }
 }
@@ -336,18 +347,16 @@ class _PrivacyPoint extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w700),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   body,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

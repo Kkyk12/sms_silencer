@@ -20,7 +20,7 @@ import androidx.core.app.RemoteInput
 
 object NotificationHelper {
     const val CHANNEL_RING = "messages_ring"
-    const val CHANNEL_SILENCED = "messages_silenced"
+    const val CHANNEL_INFO = "messages_info"
     const val REPLY_KEY = "reply_text"
     private const val BRAND_COLOR = 0xFF2F6BED.toInt()
 
@@ -48,21 +48,26 @@ object NotificationHelper {
 
     private data class Msg(val body: String, val timestamp: Long, val fromMe: Boolean)
 
-    // Per-sender message history so MessagingStyle can stack all messages.
+    // Per-conversation message history so MessagingStyle can stack all messages.
+    // Keyed by the canonical identity so the same person in two number formats
+    // stacks into one notification rather than two (B10).
     private val history = HashMap<String, ArrayDeque<Msg>>()
 
-    fun clearHistory(sender: String) { history.remove(sender) }
-
-    private fun addMsg(sender: String, body: String, fromMe: Boolean): List<Msg> {
-        val q = history.getOrPut(sender) { ArrayDeque() }
-        q.addLast(Msg(body, System.currentTimeMillis(), fromMe))
-        while (q.size > 20) q.removeFirst()
-        return q.toList()
+    fun clearHistory(sender: String) {
+        synchronized(history) { history.remove(Identity.normalize(sender)) }
     }
 
-    /** Stable notification ID per sender address. */
+    private fun addMsg(sender: String, body: String, fromMe: Boolean): List<Msg> =
+        synchronized(history) {
+            val q = history.getOrPut(Identity.normalize(sender)) { ArrayDeque() }
+            q.addLast(Msg(body, System.currentTimeMillis(), fromMe))
+            while (q.size > 20) q.removeFirst()
+            q.toList()
+        }
+
+    /** Stable notification ID per conversation (canonical, not raw, address). */
     fun notifId(sender: String): Int =
-        sender.hashCode().let { if (it == Int.MIN_VALUE) 1 else Math.abs(it) }
+        Identity.normalize(sender).hashCode().let { if (it == Int.MIN_VALUE) 1 else Math.abs(it) }
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -72,14 +77,14 @@ object NotificationHelper {
                 NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Messages from senders that are allowed to ring."
                 enableVibration(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             }
         )
         mgr.createNotificationChannel(
-            NotificationChannel(CHANNEL_SILENCED, "Silenced messages",
+            NotificationChannel(CHANNEL_INFO, "App notices",
                 NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Messages from silenced senders — no sound."
+                description = "Low-priority status notices from SMS Guard."
                 enableVibration(false)
-                setSound(null, null)
             }
         )
     }
@@ -159,6 +164,10 @@ object NotificationHelper {
             .setContentIntent(contentPi)
             .setDeleteIntent(dismissPi)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            // Hide the body on the lock screen so OTPs/codes aren't readable
+            // while the phone is locked (B14).
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             // Only ring/vibrate for genuinely new notifications, not stacked updates
             .setOnlyAlertOnce(!isFirst)
             .addAction(replyAction)
@@ -200,9 +209,28 @@ object NotificationHelper {
             .setAutoCancel(true)
             .setDeleteIntent(dismissPi)
             .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
 
         try { NotificationManagerCompat.from(context).notify(notifId, builder.build()) }
         catch (_: SecurityException) { }
+    }
+
+    /** A low-priority status notice (e.g. a scheduled message dropped after reboot). */
+    fun showSimple(context: Context, title: String, text: String) {
+        ensureChannels(context)
+        val builder = NotificationCompat.Builder(context, CHANNEL_INFO)
+            .setSmallIcon(R.drawable.ic_stat_sms)
+            .setColor(BRAND_COLOR)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+        try {
+            NotificationManagerCompat.from(context)
+                .notify(("info:" + title + text).hashCode(), builder.build())
+        } catch (_: SecurityException) { }
     }
 }

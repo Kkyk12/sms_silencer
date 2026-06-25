@@ -1,7 +1,6 @@
 package com.smsguard.sms_bllocker
 
 import android.app.AlarmManager
-import android.app.PendingIntent
 import android.app.role.RoleManager
 import android.content.BroadcastReceiver
 import android.content.ContentValues
@@ -10,9 +9,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.ContactsContract
 import android.provider.Telephony
-import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -31,29 +30,50 @@ class MainActivity : FlutterActivity() {
     private val roleRequestCode = 4231
     private var eventSink: EventChannel.EventSink? = null
 
-    private val smsArrivedReceiver = object : BroadcastReceiver() {
+    // Events emitted before Dart's onListen attaches are buffered and flushed
+    // when it does, so a cold-start deep link / first SMS isn't dropped (B6).
+    private val pendingEvents = ArrayList<Map<String, Any?>>()
+
+    private val appEventsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val sender = intent.getStringExtra("sender") ?: return
-            val body = intent.getStringExtra("body") ?: return
-            val silenced = intent.getBooleanExtra("silenced", false)
-            if (!silenced) {
-                eventSink?.success(hashMapOf("sender" to sender, "body" to body))
+            when (intent.action) {
+                "com.smsguard.sms_bllocker.SMS_ARRIVED" -> {
+                    val sender = intent.getStringExtra("sender") ?: return
+                    val body = intent.getStringExtra("body") ?: return
+                    val silenced = intent.getBooleanExtra("silenced", false)
+                    if (!silenced) emitEvent(hashMapOf("sender" to sender, "body" to body))
+                }
+                SmsStore.ACTION_SEND_STATUS,
+                "com.smsguard.sms_bllocker.SCHEDULED_SENT" ->
+                    emitEvent(hashMapOf("type" to "refresh"))
             }
+        }
+    }
+
+    /** Deliver an event to Dart, or buffer it until the stream is listening (B6). */
+    private fun emitEvent(event: Map<String, Any?>) {
+        runOnUiThread {
+            val sink = eventSink
+            if (sink != null) sink.success(event)
+            else synchronized(pendingEvents) { pendingEvents.add(event) }
         }
     }
 
     override fun onResume() {
         super.onResume()
+        val filter = IntentFilter().apply {
+            addAction("com.smsguard.sms_bllocker.SMS_ARRIVED")
+            addAction(SmsStore.ACTION_SEND_STATUS)
+            addAction("com.smsguard.sms_bllocker.SCHEDULED_SENT")
+        }
         ContextCompat.registerReceiver(
-            this, smsArrivedReceiver,
-            IntentFilter("com.smsguard.sms_bllocker.SMS_ARRIVED"),
-            ContextCompat.RECEIVER_NOT_EXPORTED,
+            this, appEventsReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED,
         )
     }
 
     override fun onPause() {
         super.onPause()
-        try { unregisterReceiver(smsArrivedReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(appEventsReceiver) } catch (_: Exception) {}
     }
 
     /**
@@ -65,7 +85,7 @@ class MainActivity : FlutterActivity() {
         setIntent(intent) // keep getIntent() fresh
         val addr = addressFromIntent(intent)
         if (addr != null) {
-            eventSink?.success(hashMapOf("type" to "openThread", "address" to addr))
+            emitEvent(hashMapOf("type" to "openThread", "address" to addr))
         }
     }
 
@@ -78,6 +98,10 @@ class MainActivity : FlutterActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
+                    synchronized(pendingEvents) {
+                        pendingEvents.forEach { events?.success(it) }
+                        pendingEvents.clear()
+                    }
                 }
                 override fun onCancel(arguments: Any?) {
                     eventSink = null
@@ -145,7 +169,7 @@ class MainActivity : FlutterActivity() {
                         if (address.isNullOrBlank() || body == null) {
                             result.error("ARG", "address and body required", null)
                         } else {
-                            result.success(sendSms(address, body, subId))
+                            result.success(SmsStore.send(this, address, body, subId))
                         }
                     }
 
@@ -188,8 +212,6 @@ class MainActivity : FlutterActivity() {
                         val id = call.argument<Number>("id")?.toLong()
                         result.success(if (id == null) false else deleteMessage(id))
                     }
-
-                    "getMessages" -> result.success(readInbox())
 
                     "getFolders" -> result.success(folderList())
 
@@ -263,11 +285,12 @@ class MainActivity : FlutterActivity() {
                         if (address.isNullOrBlank() || body == null || timeMillis == null) {
                             result.error("ARG", "address, body, timeMillis required", null)
                         } else {
-                            val msgId = System.currentTimeMillis().toString() + "_" + (Math.random() * 10000).toInt()
-                            val msg = Prefs.ScheduledMsg(msgId, address, body, timeMillis)
+                            val requestCode = Prefs.nextRequestCode(this)
+                            val msgId = System.currentTimeMillis().toString() + "_" + requestCode
+                            val msg = Prefs.ScheduledMsg(msgId, address, body, timeMillis, requestCode)
                             Prefs.addScheduled(this, msg)
                             val am = getSystemService(AlarmManager::class.java)
-                            if (am != null) BootReceiver.scheduleAlarm(this, am, msgId, timeMillis)
+                            if (am != null) BootReceiver.scheduleAlarm(this, am, requestCode, msgId, timeMillis)
                             result.success(msgId)
                         }
                     }
@@ -276,8 +299,9 @@ class MainActivity : FlutterActivity() {
                         val msgId = call.argument<String>("msgId")
                         if (msgId.isNullOrBlank()) result.error("ARG", "msgId required", null)
                         else {
+                            val existing = Prefs.getScheduled(this).firstOrNull { it.id == msgId }
+                            if (existing != null) BootReceiver.cancelAlarm(this, existing.requestCode)
                             Prefs.removeScheduled(this, msgId)
-                            BootReceiver.cancelAlarm(this, msgId)
                             result.success(null)
                         }
                     }
@@ -316,7 +340,9 @@ class MainActivity : FlutterActivity() {
 
     /**
      * Extract a phone number/address from an intent sent by the phone dialer or
-     * another app. Handles sms:/smsto:/mms:/mmsto: URIs and plain extras.
+     * another app. Handles sms:/smsto:/mms:/mmsto: URIs and plain extras, and
+     * validates the result so a malicious app / smsto: link can't pre-fill the
+     * compose field with arbitrary text (B15).
      */
     private fun addressFromIntent(i: Intent?): String? {
         if (i == null) return null
@@ -325,32 +351,43 @@ class MainActivity : FlutterActivity() {
             val scheme = data.scheme?.lowercase()
             if (scheme == "sms" || scheme == "smsto" || scheme == "mms" || scheme == "mmsto") {
                 // "smsto://+2519..." → host contains the number
-                val host = data.host
-                if (!host.isNullOrBlank()) {
-                    return Uri.decode(host).trim().takeIf { it.isNotEmpty() }
+                data.host?.let { h ->
+                    sanitizeAddress(Uri.decode(h))?.let { return it }
                 }
                 // "smsto:+2519..." → schemeSpecificPart contains the number
-                val ssp = data.schemeSpecificPart
-                if (!ssp.isNullOrBlank()) {
+                data.schemeSpecificPart?.let { ssp ->
                     // Strip leading "//" and query params, e.g. "//+2519…?body=…"
-                    val clean = ssp.trimStart('/').split("?").first().trim()
-                    if (clean.isNotEmpty()) return Uri.decode(clean)
+                    val clean = ssp.trimStart('/').split("?").first()
+                    sanitizeAddress(Uri.decode(clean))?.let { return it }
                 }
                 // Fallback: last path segment
-                val seg = data.lastPathSegment
-                if (!seg.isNullOrBlank()) return Uri.decode(seg).trim()
+                data.lastPathSegment?.let { seg ->
+                    sanitizeAddress(Uri.decode(seg))?.let { return it }
+                }
             }
         }
-        // Standard extras used by various dialers
-        val extraKeys = listOf(
-            "address", "recipient", Intent.EXTRA_PHONE_NUMBER,
-            Intent.EXTRA_TEXT, "sms_body", "phone_number",
-        )
+        // Standard recipient extras used by various dialers. (EXTRA_TEXT / sms_body
+        // are message *body*, not address — deliberately excluded.)
+        val extraKeys = listOf("address", "recipient", Intent.EXTRA_PHONE_NUMBER, "phone_number")
         for (key in extraKeys) {
-            val v = i.getStringExtra(key)?.trim()
-            if (!v.isNullOrEmpty()) return v
+            sanitizeAddress(i.getStringExtra(key))?.let { return it }
         }
         return null
+    }
+
+    /**
+     * Accept only plausible recipients: a phone-like string (digits + dialling
+     * punctuation) or a short alphanumeric sender ID. Rejects control chars,
+     * over-long input and free-form text.
+     */
+    private fun sanitizeAddress(raw: String?): String? {
+        if (raw == null) return null
+        val s = raw.trim()
+        if (s.isEmpty() || s.length > 40) return null
+        if (s.any { it.isISOControl() }) return null
+        val phoneLike = s.all { it.isDigit() || it in "+-() .#*" } && s.any { it.isDigit() }
+        val senderId = s.length <= 11 && s.all { it.isLetterOrDigit() || it == ' ' || it == '.' || it == '-' }
+        return if (phoneLike || senderId) s else null
     }
 
     private fun folderList(): List<Map<String, Any?>> =
@@ -425,52 +462,22 @@ class MainActivity : FlutterActivity() {
         )
     }
 
-    /** Read recent inbox messages for the in-app list. Needs READ_SMS at runtime. */
-    private fun readInbox(): List<Map<String, Any?>> {
-        val out = ArrayList<Map<String, Any?>>()
-        val projection = arrayOf(
-            Telephony.Sms.ADDRESS,
-            Telephony.Sms.BODY,
-            Telephony.Sms.DATE,
-        )
-        val cursor = contentResolver.query(
-            Telephony.Sms.Inbox.CONTENT_URI,
-            projection,
-            null,
-            null,
-            "${Telephony.Sms.DATE} DESC",
-        )
-        cursor?.use { c ->
-            val iAddr = c.getColumnIndex(Telephony.Sms.ADDRESS)
-            val iBody = c.getColumnIndex(Telephony.Sms.BODY)
-            val iDate = c.getColumnIndex(Telephony.Sms.DATE)
-            var count = 0
-            while (c.moveToNext() && count < 300) {
-                val address = if (iAddr >= 0) c.getString(iAddr) else null
-                out.add(
-                    hashMapOf(
-                        "address" to address,
-                        "body" to (if (iBody >= 0) c.getString(iBody) else null),
-                        "date" to (if (iDate >= 0) c.getLong(iDate) else 0L),
-                        "silenced" to (address != null && Prefs.isSilenced(this, address)),
-                    ),
-                )
-                count++
-            }
-        }
-        return out
-    }
-
     // ---- conversations / thread / send -------------------------------------
 
-    /** Group key so different formats of the same number/sender collapse together. */
-    private fun convKey(address: String): String {
-        val digits = address.filter { it.isDigit() }
-        return if (digits.length >= 7) digits.takeLast(10) else address.trim().lowercase()
-    }
+    /** Canonical conversation key — the single shared rule (see [Identity]). */
+    private fun convKey(address: String): String = Identity.normalize(address)
+
+    // Contacts change rarely but loadConversations() runs after every mutation;
+    // cache the contact maps briefly so we don't re-query the whole address book
+    // on each refresh (B17).
+    private var contactCache: Pair<Map<String, String>, Map<String, String?>>? = null
+    private var contactCacheAt = 0L
+    private val contactCacheTtlMs = 30_000L
 
     /** name map and photo-URI map, keyed by normalized number. */
     private fun loadContactMaps(): Pair<Map<String, String>, Map<String, String?>> {
+        val now = SystemClock.elapsedRealtime()
+        contactCache?.let { if (now - contactCacheAt < contactCacheTtlMs) return it }
         val names = HashMap<String, String>()
         val photos = HashMap<String, String?>()
         try {
@@ -500,7 +507,10 @@ class MainActivity : FlutterActivity() {
                 }
             }
         } catch (_: Exception) {}
-        return Pair(names, photos)
+        val pair = Pair<Map<String, String>, Map<String, String?>>(names, photos)
+        contactCache = pair
+        contactCacheAt = now
+        return pair
     }
 
     /** Saved contact name for one address, or null. */
@@ -619,13 +629,21 @@ class MainActivity : FlutterActivity() {
                         "id" to (if (iId >= 0) c.getLong(iId) else 0L),
                         "body" to (if (iB >= 0) c.getString(iB) else ""),
                         "date" to (if (iD >= 0) c.getLong(iD) else 0L),
-                        "outgoing" to (type == Telephony.Sms.MESSAGE_TYPE_SENT),
+                        "outgoing" to (type != Telephony.Sms.MESSAGE_TYPE_INBOX),
+                        "status" to statusFor(type),
                         "subId" to (if (iSub >= 0) c.getInt(iSub) else -1),
                     ),
                 )
             }
         }
         return out
+    }
+
+    /** Map a provider message TYPE to a coarse send status for the UI. */
+    private fun statusFor(type: Int): String = when (type) {
+        Telephony.Sms.MESSAGE_TYPE_FAILED -> "failed"
+        Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.MESSAGE_TYPE_QUEUED -> "sending"
+        else -> "sent"
     }
 
     /** Delete every message in a conversation. Needs to be the default SMS app. */
@@ -670,10 +688,12 @@ class MainActivity : FlutterActivity() {
     private fun markThreadRead(target: String) {
         try {
             val key = convKey(target)
+            // Clear both unread (READ=0) and unseen (SEEN=0) so the system badge
+            // clears, not just the in-app list (B17).
             val cursor = contentResolver.query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS),
-                "${Telephony.Sms.READ}=0", null, null,
+                "${Telephony.Sms.READ}=0 OR ${Telephony.Sms.SEEN}=0", null, null,
             )
             cursor?.use { c ->
                 val iId = c.getColumnIndex(Telephony.Sms._ID)
@@ -693,45 +713,6 @@ class MainActivity : FlutterActivity() {
                 }
             }
         } catch (_: Exception) {
-        }
-    }
-
-    /**
-     * Send an SMS and store it in the Sent box (default-app responsibility).
-     * [subId] selects which SIM to send on; -1 uses the system default.
-     */
-    private fun sendSms(address: String, body: String, subId: Int): Boolean {
-        return try {
-            val sms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val base = getSystemService(SmsManager::class.java)
-                if (subId >= 0) base.createForSubscriptionId(subId) else base
-            } else {
-                @Suppress("DEPRECATION")
-                if (subId >= 0) SmsManager.getSmsManagerForSubscriptionId(subId)
-                else SmsManager.getDefault()
-            }
-            val parts = sms.divideMessage(body)
-            if (parts.size > 1) {
-                sms.sendMultipartTextMessage(address, null, parts, null, null)
-            } else {
-                sms.sendTextMessage(address, null, body, null, null)
-            }
-            try {
-                val values = ContentValues().apply {
-                    put(Telephony.Sms.ADDRESS, address)
-                    put(Telephony.Sms.BODY, body)
-                    put(Telephony.Sms.DATE, System.currentTimeMillis())
-                    put(Telephony.Sms.READ, 1)
-                    put(Telephony.Sms.SEEN, 1)
-                    put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
-                    if (subId >= 0) put(Telephony.Sms.SUBSCRIPTION_ID, subId)
-                }
-                contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
-            } catch (_: Exception) {
-            }
-            true
-        } catch (_: Exception) {
-            false
         }
     }
 }
